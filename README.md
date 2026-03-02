@@ -19,9 +19,9 @@ A pixel-art desktop companion running on M5Stack Cardputer (ESP32-S3). Features 
 ```bash
 export WIFI_SSID="your_wifi_name"
 export WIFI_PASS="your_wifi_password"
-export OPENCLAW_HOST="192.168.1.100"   # your Mac/VPS LAN IP
-export OPENCLAW_PORT="18789"
-export OPENCLAW_TOKEN="your_gateway_token"
+export OPENCLAW_HOST="<your-host-ip>"       # your Mac/VPS LAN IP
+export OPENCLAW_PORT="<your-port>"           # Gateway port
+export OPENCLAW_TOKEN="<your-gateway-token>"
 ```
 
 ### 2. Build & Flash

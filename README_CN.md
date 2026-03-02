@@ -19,9 +19,9 @@ M5Stack Cardputer (ESP32-S3) 上的像素风桌面伴侣。OpenClaw 小龙虾角
 ```bash
 export WIFI_SSID="你的WiFi名称"
 export WIFI_PASS="你的WiFi密码"
-export OPENCLAW_HOST="192.168.1.100"   # Mac/VPS 的局域网 IP
-export OPENCLAW_PORT="18789"
-export OPENCLAW_TOKEN="你的Gateway Token"
+export OPENCLAW_HOST="<your-host-ip>"       # Mac/VPS 的局域网 IP
+export OPENCLAW_PORT="<your-port>"           # Gateway 端口
+export OPENCLAW_TOKEN="<your-gateway-token>"
 ```
 
 ### 2. 编译烧录

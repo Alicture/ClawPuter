@@ -123,8 +123,8 @@ pio run -t upload && pio device monitor
 export WIFI_SSID="YOUR_WIFI_SSID" && \
 export WIFI_PASS="YOUR_WIFI_PASSWORD" && \
 export CLAUDE_API_KEY="YOUR_API_KEY" && \
-export OPENCLAW_HOST="192.168.1.100" && \
-export OPENCLAW_PORT="18789" && \
+export OPENCLAW_HOST="<your-host-ip>" && \
+export OPENCLAW_PORT="<your-port>" && \
 export OPENCLAW_TOKEN="YOUR_GATEWAY_TOKEN" && \
 pio run -t upload && pio device monitor
 ```

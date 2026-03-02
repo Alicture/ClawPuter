@@ -6,10 +6,10 @@
 
 // OpenClaw Gateway on LAN — configure via environment variables
 #ifndef OPENCLAW_HOST
-#define OPENCLAW_HOST "192.168.1.100"  // default, override with -DOPENCLAW_HOST
+#define OPENCLAW_HOST ""  // set via environment variable
 #endif
 #ifndef OPENCLAW_PORT
-#define OPENCLAW_PORT "18789"
+#define OPENCLAW_PORT ""
 #endif
 #ifndef OPENCLAW_TOKEN
 #define OPENCLAW_TOKEN ""
