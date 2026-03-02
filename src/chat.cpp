@@ -1,11 +1,16 @@
 #include "chat.h"
 
 void Chat::begin(M5Canvas& canvas) {
-    messageCount = 0;
-    inputBuffer = "";
-    pendingMessage = "";
-    scrollOffset = 0;
-    waitingForAI = false;
+    if (!initialized) {
+        messageCount = 0;
+        inputBuffer = "";
+        pendingMessage = "";
+        waitingForAI = false;
+        initialized = true;
+    }
+    // Recalculate and scroll to bottom
+    totalContentH = calcTotalHeight(canvas);
+    scrollToBottom();
 }
 
 void Chat::update(M5Canvas& canvas) {
@@ -14,7 +19,7 @@ void Chat::update(M5Canvas& canvas) {
     // Header
     canvas.setTextColor(Color::CLOCK_TEXT);
     canvas.setTextSize(1);
-    canvas.drawString("[TAB] back", 4, 2);
+    canvas.drawString("[TAB] back  [;] up  [/] down", 4, 2);
     canvas.drawFastHLine(0, MSG_AREA_Y - 1, SCREEN_W, Color::GROUND_TOP);
 
     drawMessages(canvas);
@@ -35,6 +40,7 @@ void Chat::handleEnter() {
     pendingMessage = inputBuffer;
     inputBuffer = "";
     waitingForAI = true;
+    userScrolled = false;
 
     // Add placeholder for AI response
     addMessage("thinking...", false);
@@ -46,6 +52,21 @@ void Chat::handleBackspace() {
     }
 }
 
+void Chat::scrollUp() {
+    scrollY -= MSG_AREA_H / 2;  // half page
+    if (scrollY < 0) scrollY = 0;
+    userScrolled = true;
+}
+
+void Chat::scrollDown() {
+    scrollY += MSG_AREA_H / 2;
+    int maxScroll = totalContentH - MSG_AREA_H;
+    if (maxScroll < 0) maxScroll = 0;
+    if (scrollY > maxScroll) scrollY = maxScroll;
+    // If we're at bottom, clear manual scroll flag
+    if (scrollY >= maxScroll) userScrolled = false;
+}
+
 void Chat::appendAIToken(const String& token) {
     if (messageCount > 0 && !messages[(messageCount - 1) % MAX_MESSAGES].isUser) {
         Message& lastMsg = messages[(messageCount - 1) % MAX_MESSAGES];
@@ -55,11 +76,13 @@ void Chat::appendAIToken(const String& token) {
             lastMsg.text += token;
         }
     }
-    scrollToBottom();
+    if (!userScrolled) scrollToBottom();
 }
 
 void Chat::onAIResponseComplete() {
     waitingForAI = false;
+    userScrolled = false;
+    scrollToBottom();
 }
 
 String Chat::takePendingMessage() {
@@ -73,61 +96,107 @@ void Chat::addMessage(const String& text, bool isUser) {
     messages[idx].text = text;
     messages[idx].isUser = isUser;
     messageCount++;
-    scrollToBottom();
+    if (!userScrolled) scrollToBottom();
+}
+
+int Chat::calcMessageHeight(M5Canvas& canvas, const Message& msg) {
+    if (msg.isUser) {
+        return LINE_H;
+    }
+    // AI messages may wrap
+    String text = msg.text;
+    int lines = 1;
+    while (text.length() > 0) {
+        int fitLen = text.length();
+        while (fitLen > 0 && canvas.textWidth(text.substring(0, fitLen).c_str()) > MAX_W) {
+            fitLen--;
+        }
+        if (fitLen == 0) fitLen = 1;
+        text = text.substring(fitLen);
+        if (text.length() > 0) lines++;
+    }
+    return lines * LINE_H;
+}
+
+int Chat::calcTotalHeight(M5Canvas& canvas) {
+    int total = min(messageCount, MAX_MESSAGES);
+    int startIdx = (messageCount > MAX_MESSAGES) ? (messageCount - MAX_MESSAGES) : 0;
+    int h = 0;
+    canvas.setTextSize(1);
+    for (int i = 0; i < total; i++) {
+        int idx = (startIdx + i) % MAX_MESSAGES;
+        h += calcMessageHeight(canvas, messages[idx]);
+    }
+    return h;
 }
 
 void Chat::scrollToBottom() {
-    // Simple: always show latest messages
-    int total = min(messageCount, MAX_MESSAGES);
-    int visibleLines = MSG_AREA_H / 12; // ~12px per line
-    if (total > visibleLines) {
-        scrollOffset = total - visibleLines;
-    } else {
-        scrollOffset = 0;
-    }
+    // Will be called with canvas context from update/begin
+    int maxScroll = totalContentH - MSG_AREA_H;
+    if (maxScroll < 0) maxScroll = 0;
+    scrollY = maxScroll;
 }
 
 void Chat::drawMessages(M5Canvas& canvas) {
     int total = min(messageCount, MAX_MESSAGES);
     int startIdx = (messageCount > MAX_MESSAGES) ? (messageCount - MAX_MESSAGES) : 0;
 
+    // Recalculate total height each frame (AI messages grow during streaming)
     canvas.setTextSize(1);
-    int y = MSG_AREA_Y + 2;
-    int lineH = 12;
+    totalContentH = calcTotalHeight(canvas);
 
-    for (int i = scrollOffset; i < total && y < SCREEN_H - INPUT_BAR_H - 2; i++) {
+    // Clamp scrollY
+    int maxScroll = totalContentH - MSG_AREA_H;
+    if (maxScroll < 0) maxScroll = 0;
+    if (scrollY > maxScroll) scrollY = maxScroll;
+    if (scrollY < 0) scrollY = 0;
+    // Auto-scroll if not manually scrolled
+    if (!userScrolled) scrollY = maxScroll;
+
+    // Draw with virtual Y offset
+    int y = MSG_AREA_Y + 2 - scrollY;
+
+    for (int i = 0; i < total; i++) {
         int idx = (startIdx + i) % MAX_MESSAGES;
         Message& msg = messages[idx];
 
         if (msg.isUser) {
             // User message - right aligned, blue
-            canvas.setTextColor(Color::CHAT_USER);
-            int tw = canvas.textWidth(msg.text.c_str());
-            int tx = SCREEN_W - tw - 6;
-            if (tx < 4) tx = 4;
-            canvas.fillRoundRect(tx - 2, y - 1, min(tw + 4, SCREEN_W - 4), lineH, 2, Color::INPUT_BG);
-            canvas.drawString(msg.text.c_str(), tx, y);
+            if (y >= MSG_AREA_Y - LINE_H && y < SCREEN_H - INPUT_BAR_H) {
+                canvas.setTextColor(Color::CHAT_USER);
+                int tw = canvas.textWidth(msg.text.c_str());
+                int tx = SCREEN_W - tw - 6;
+                if (tx < 4) tx = 4;
+                canvas.fillRoundRect(tx - 2, y - 1, min(tw + 4, SCREEN_W - 4), LINE_H, 2, Color::INPUT_BG);
+                canvas.drawString(msg.text.c_str(), tx, y);
+            }
+            y += LINE_H;
         } else {
-            // AI message - left aligned, green
+            // AI message - left aligned, green, word wrap
             canvas.setTextColor(Color::CHAT_AI);
-            // Word wrap for long messages
             String text = msg.text;
-            int maxW = SCREEN_W - 12;
-            while (text.length() > 0 && y < SCREEN_H - INPUT_BAR_H - 2) {
-                // Find how many chars fit
+            while (text.length() > 0) {
                 int fitLen = text.length();
-                while (fitLen > 0 && canvas.textWidth(text.substring(0, fitLen).c_str()) > maxW) {
+                while (fitLen > 0 && canvas.textWidth(text.substring(0, fitLen).c_str()) > MAX_W) {
                     fitLen--;
                 }
                 if (fitLen == 0) fitLen = 1;
 
-                String line = text.substring(0, fitLen);
-                canvas.drawString(line.c_str(), 6, y);
+                if (y >= MSG_AREA_Y - LINE_H && y < SCREEN_H - INPUT_BAR_H) {
+                    String line = text.substring(0, fitLen);
+                    canvas.drawString(line.c_str(), 6, y);
+                }
                 text = text.substring(fitLen);
-                if (text.length() > 0) y += lineH;
+                y += LINE_H;
             }
         }
-        y += lineH;
+    }
+
+    // Scroll indicator
+    if (totalContentH > MSG_AREA_H) {
+        int barH = max(8, MSG_AREA_H * MSG_AREA_H / totalContentH);
+        int barY = MSG_AREA_Y + (scrollY * (MSG_AREA_H - barH)) / maxScroll;
+        canvas.fillRect(SCREEN_W - 2, barY, 2, barH, Color::STATUS_DIM);
     }
 }
 
