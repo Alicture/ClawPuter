@@ -38,6 +38,9 @@ void enterChatMode();
 void setup() {
     auto cfg = M5.config();
     M5Cardputer.begin(cfg, true);
+    Serial.begin(115200);
+    delay(500);
+    Serial.println("[BOOT] Starting...");
 
     // Screen setup
     M5Cardputer.Display.setRotation(1);
@@ -45,9 +48,26 @@ void setup() {
     canvas.createSprite(SCREEN_W, SCREEN_H);
     canvas.setTextWrap(false);
 
-    // Try loading saved config
-    if (Config::load() && Config::isValid()) {
-        // Show connecting screen
+    // Try build-time credentials first, then NVS, then setup wizard
+    Config::load();
+
+    #if defined(WIFI_SSID) && defined(WIFI_PASS)
+    if (strlen(WIFI_SSID) > 0) {
+        Config::setSSID(WIFI_SSID);
+        Config::setPassword(WIFI_PASS);
+        #ifdef CLAUDE_API_KEY
+        if (strlen(CLAUDE_API_KEY) > 0) {
+            Config::setApiKey(CLAUDE_API_KEY);
+        }
+        #endif
+        Config::save();
+    }
+    #endif
+
+    // Play boot animation
+    playBootAnimation(canvas);
+
+    if (Config::isValid()) {
         canvas.fillScreen(Color::BG_DAY);
         canvas.setTextColor(Color::CLOCK_TEXT);
         canvas.setTextSize(1);
@@ -86,6 +106,7 @@ void loop() {
         case AppMode::COMPANION:
             if (keyPressed) {
                 if (keys.tab) {
+                    playTransition(canvas, true);
                     enterChatMode();
                     break;
                 }
@@ -108,21 +129,32 @@ void loop() {
         case AppMode::CHAT:
             if (keyPressed) {
                 if (keys.tab) {
+                    playTransition(canvas, false);
                     enterCompanionMode();
                     break;
                 }
                 if (keys.enter) {
+                    Serial.println("[CHAT] Enter pressed");
                     chat.handleEnter();
                 } else if (keys.del) {
                     chat.handleBackspace();
                 } else if (keys.word.size() > 0) {
-                    chat.handleKey(keys.word[0]);
+                    char key = keys.word[0];
+                    if (keys.fn && key == ';') {
+                        chat.scrollUp();
+                    } else if (keys.fn && key == '/') {
+                        chat.scrollDown();
+                    } else {
+                        Serial.printf("[CHAT] Key: %c\n", key);
+                        chat.handleKey(key);
+                    }
                 }
             }
 
             // Check if chat has a message to send
             if (chat.hasPendingMessage() && !aiClient.isBusy()) {
                 String msg = chat.takePendingMessage();
+                Serial.println("[CHAT] Sending to AI: " + msg);
                 companion.triggerTalk();
 
                 aiClient.sendMessage(msg,
