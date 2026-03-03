@@ -5,6 +5,9 @@ enum PetState {
     case walk
     case happy
     case sleep
+    case talk
+    case stretch
+    case look
 }
 
 /// Manages pet state machine, cursor following, and animation timing
@@ -47,6 +50,12 @@ class PetBehavior {
     private var happyTimer: TimeInterval = 0
     private let happyDuration: TimeInterval = 2.0
 
+    // ── Sync mode ──
+    private(set) var syncMode: Bool = false
+    private var lastSyncTime: TimeInterval = 0
+    private let syncTimeout: TimeInterval = 3.0 // fall back to independent mode after 3s
+    private var syncDirty: Bool = false // set by applySync, consumed by update
+
     init() {
         lastUpdateTime = ProcessInfo.processInfo.systemUptime
     }
@@ -85,18 +94,21 @@ class PetBehavior {
             // Face toward cursor
             facingLeft = point.x < posX + 64
 
-            // Transition to walk if idle/sleep
-            if state == .idle || state == .sleep {
-                state = .walk
-                currentFrame = 0
-            }
+            // In sync mode, don't override state from cursor movement
+            if !syncMode {
+                // Transition to walk if idle/sleep
+                if state == .idle || state == .sleep {
+                    state = .walk
+                    currentFrame = 0
+                }
 
-            // Check for happy trigger (fast cursor movement)
-            if cursorSpeedAccumulator > happySpeedThreshold && state != .happy {
-                state = .happy
-                currentFrame = 0
-                happyTimer = 0
-                cursorSpeedAccumulator = 0
+                // Check for happy trigger (fast cursor movement)
+                if cursorSpeedAccumulator > happySpeedThreshold && state != .happy {
+                    state = .happy
+                    currentFrame = 0
+                    happyTimer = 0
+                    cursorSpeedAccumulator = 0
+                }
             }
         }
 
@@ -104,42 +116,76 @@ class PetBehavior {
         lastCursorY = point.y
     }
 
+    /// Apply state from ESP32 UDP broadcast
+    func applySync(state espState: Int, frame: Int) {
+        lastSyncTime = ProcessInfo.processInfo.systemUptime
+        syncMode = true
+
+        // Map ESP32 CompanionState enum to PetState
+        // 0=IDLE, 1=HAPPY, 2=SLEEP, 3=TALK, 4=STRETCH, 5=LOOK
+        switch espState {
+        case 0: state = .idle
+        case 1: state = .happy
+        case 2: state = .sleep
+        case 3: state = .talk
+        case 4: state = .stretch
+        case 5: state = .look
+        default: state = .idle
+        }
+
+        // Use the firmware's frame index directly
+        let frames = currentFrames()
+        currentFrame = frame % frames.count
+        syncDirty = true
+    }
+
     /// Update loop — call at ~60fps
     func update() -> Bool {
         let now = ProcessInfo.processInfo.systemUptime
         let dt = now - lastUpdateTime
         lastUpdateTime = now
-        var needsRedraw = false
+        var needsRedraw = syncDirty
+        syncDirty = false
 
         cursorIdleTime += dt
         cursorSpeedAccumulator *= 0.95 // Decay speed accumulator
 
-        // State transitions
-        switch state {
-        case .walk:
-            if cursorIdleTime > walkToIdleTime {
-                state = .idle
-                currentFrame = 0
-                needsRedraw = true
-            }
-        case .idle:
-            if cursorIdleTime > idleToSleepTime {
-                state = .sleep
-                currentFrame = 0
-                needsRedraw = true
-            }
-        case .happy:
-            happyTimer += dt
-            if happyTimer > happyDuration {
-                state = .idle
-                currentFrame = 0
-                needsRedraw = true
-            }
-        case .sleep:
-            break
+        // Check sync timeout
+        if syncMode && (now - lastSyncTime > syncTimeout) {
+            syncMode = false
+            state = .idle
+            currentFrame = 0
+            needsRedraw = true
         }
 
-        // Smooth position lerp
+        // State transitions (only in independent mode)
+        if !syncMode {
+            switch state {
+            case .walk:
+                if cursorIdleTime > walkToIdleTime {
+                    state = .idle
+                    currentFrame = 0
+                    needsRedraw = true
+                }
+            case .idle:
+                if cursorIdleTime > idleToSleepTime {
+                    state = .sleep
+                    currentFrame = 0
+                    needsRedraw = true
+                }
+            case .happy:
+                happyTimer += dt
+                if happyTimer > happyDuration {
+                    state = .idle
+                    currentFrame = 0
+                    needsRedraw = true
+                }
+            case .sleep, .talk, .stretch, .look:
+                break
+            }
+        }
+
+        // Smooth position lerp (always active, even in sync mode)
         let dx = targetX - posX
         let dy = targetY - posY
         let distance = sqrt(dx * dx + dy * dy)
@@ -150,12 +196,14 @@ class PetBehavior {
             needsRedraw = true
         }
 
-        // Frame animation
-        frameTimer += dt
-        if frameTimer >= frameInterval {
-            frameTimer -= frameInterval
-            advanceFrame()
-            needsRedraw = true
+        // Frame animation (only in independent mode — sync mode sets frame directly)
+        if !syncMode {
+            frameTimer += dt
+            if frameTimer >= frameInterval {
+                frameTimer -= frameInterval
+                advanceFrame()
+                needsRedraw = true
+            }
         }
 
         return needsRedraw
@@ -172,6 +220,9 @@ class PetBehavior {
         case .walk: return SpriteFrames.walk
         case .happy: return SpriteFrames.happy
         case .sleep: return SpriteFrames.sleep
+        case .talk: return SpriteFrames.talk
+        case .stretch: return SpriteFrames.stretch
+        case .look: return SpriteFrames.look
         }
     }
 

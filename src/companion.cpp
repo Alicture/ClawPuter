@@ -100,10 +100,9 @@ void Companion::update(M5Canvas& canvas) {
                 frameIndex %= IDLE_FRAME_COUNT;
                 break;
             case CompanionState::HAPPY:
-                if (frameIndex >= HAPPY_FRAME_COUNT * 3) {
+                frameIndex %= HAPPY_FRAME_COUNT;
+                if (millis() - stateStartTime > 1200) { // 3 cycles × 2 frames × 200ms
                     setState(CompanionState::IDLE);
-                } else {
-                    frameIndex %= HAPPY_FRAME_COUNT;
                 }
                 break;
             case CompanionState::SLEEP:
@@ -113,19 +112,15 @@ void Companion::update(M5Canvas& canvas) {
                 frameIndex %= TALK_FRAME_COUNT;
                 break;
             case CompanionState::STRETCH:
-                // Stretch: use happy frames but slower, return after 2 cycles
-                if (frameIndex >= HAPPY_FRAME_COUNT * 2) {
+                frameIndex %= HAPPY_FRAME_COUNT;
+                if (millis() - stateStartTime > 1600) { // 2 cycles × 2 frames × 400ms
                     setState(CompanionState::IDLE);
-                } else {
-                    frameIndex %= HAPPY_FRAME_COUNT;
                 }
                 break;
             case CompanionState::LOOK:
-                // Look around: use idle frames quickly, return after 1 cycle
-                if (frameIndex >= IDLE_FRAME_COUNT * 2) {
+                frameIndex %= IDLE_FRAME_COUNT;
+                if (millis() - stateStartTime > 2400) { // 2 cycles × 4 frames × 300ms
                     setState(CompanionState::IDLE);
-                } else {
-                    frameIndex %= IDLE_FRAME_COUNT;
                 }
                 break;
         }

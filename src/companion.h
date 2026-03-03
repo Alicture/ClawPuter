@@ -23,6 +23,7 @@ public:
     void triggerIdle();
 
     CompanionState getState() const { return state; }
+    int getFrameIndex() const { return frameIndex; }
 
     // Sound effects
     static void playKeyClick();

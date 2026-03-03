@@ -6,6 +6,7 @@
 #include "companion.h"
 #include "chat.h"
 #include "ai_client.h"
+#include "state_broadcast.h"
 
 // ── Globals ──
 M5Canvas canvas(&M5Cardputer.Display);
@@ -184,6 +185,13 @@ void loop() {
             break;
     }
 
+    // Broadcast state over UDP for desktop sync
+    const char* modeStr = "COMPANION";
+    if (appMode == AppMode::CHAT) modeStr = "CHAT";
+    else if (appMode == AppMode::SETUP) modeStr = "SETUP";
+    stateBroadcastTick(static_cast<int>(companion.getState()),
+                       companion.getFrameIndex(), modeStr);
+
     delay(16); // ~60fps cap
 }
 
@@ -326,6 +334,9 @@ void connectWiFi() {
         canvas.drawString(WiFi.localIP().toString().c_str(), 80, 65);
         canvas.pushSprite(0, 0);
         delay(1000);
+
+        // Init state broadcast (UDP)
+        stateBroadcastBegin();
 
         // Init AI client
         if (Config::getApiKey().length() > 0) {

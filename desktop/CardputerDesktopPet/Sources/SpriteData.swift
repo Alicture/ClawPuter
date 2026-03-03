@@ -145,11 +145,56 @@ let sprite_sleep1: [UInt16] = [
     T_,T_,T_,T_,T_,K, T_,K, K, T_,K, T_,T_,T_,T_,T_,
 ]
 
+// ── Talk frame 1: mouth open ──
+let sprite_talk1: [UInt16] = [
+    T_,T_,K, T_,T_,T_,T_,T_,T_,T_,T_,T_,T_,K, T_,T_,
+    T_,T_,T_,K, T_,T_,T_,T_,T_,T_,T_,T_,K, T_,T_,T_,
+    T_,T_,T_,T_,K, K, K, K, K, K, K, K, T_,T_,T_,T_,
+    T_,T_,T_,K, R, R, R, R, R, R, R, R, K, T_,T_,T_,
+    T_,T_,K, R, R, W, W, R, R, W, W, R, R, K, T_,T_,
+    T_,T_,K, R, R, W, E, R, R, W, E, R, R, K, T_,T_,
+    T_,T_,K, R, R, R, R, R, R, R, R, R, R, K, T_,T_,
+    T_,T_,T_,K, R, R, K, O, O, K, R, R, K, T_,T_,T_,
+    T_,T_,T_,K, R, R, K, K, K, K, R, R, K, T_,T_,T_,
+    T_,K, K, T_,K, R, R, R, R, R, R, K, T_,K, K, T_,
+    K, C, C, K, T_,K, D, D, D, D, K, T_,K, C, C, K,
+    K, C, C, K, T_,K, D, D, D, D, K, T_,K, C, C, K,
+    T_,K, K, T_,T_,K, D, D, D, D, K, T_,T_,K, K, T_,
+    T_,T_,T_,T_,K, T, K, D, D, K, T, K, T_,T_,T_,T_,
+    T_,T_,T_,T_,K, T, K, T, T, K, T, K, T_,T_,T_,T_,
+    T_,T_,T_,T_,T_,K, T_,K, K, T_,K, T_,T_,T_,T_,T_,
+]
+
+// ── Talk frame 2: mouth closed ──
+let sprite_talk2: [UInt16] = [
+    T_,T_,K, T_,T_,T_,T_,T_,T_,T_,T_,T_,T_,K, T_,T_,
+    T_,T_,T_,K, T_,T_,T_,T_,T_,T_,T_,T_,K, T_,T_,T_,
+    T_,T_,T_,T_,K, K, K, K, K, K, K, K, T_,T_,T_,T_,
+    T_,T_,T_,K, R, R, R, R, R, R, R, R, K, T_,T_,T_,
+    T_,T_,K, R, R, W, W, R, R, W, W, R, R, K, T_,T_,
+    T_,T_,K, R, R, W, E, R, R, W, E, R, R, K, T_,T_,
+    T_,T_,K, R, R, R, R, R, R, R, R, R, R, K, T_,T_,
+    T_,T_,T_,K, R, R, K, K, K, K, R, R, K, T_,T_,T_,
+    T_,T_,T_,K, R, R, R, R, R, R, R, R, K, T_,T_,T_,
+    T_,K, K, T_,K, R, R, R, R, R, R, K, T_,K, K, T_,
+    K, C, C, K, T_,K, D, D, D, D, K, T_,K, C, C, K,
+    K, C, C, K, T_,K, D, D, D, D, K, T_,K, C, C, K,
+    T_,K, K, T_,T_,K, D, D, D, D, K, T_,T_,K, K, T_,
+    T_,T_,T_,T_,K, T, K, D, D, K, T, K, T_,T_,T_,T_,
+    T_,T_,T_,T_,K, T, K, T, T, K, T, K, T_,T_,T_,T_,
+    T_,T_,T_,T_,T_,K, T_,K, K, T_,K, T_,T_,T_,T_,T_,
+]
+
 // Frame lookup arrays (matching Cardputer firmware)
 struct SpriteFrames {
     static let idle: [[UInt16]] = [sprite_idle1, sprite_idle2, sprite_idle1, sprite_idle3]
     static let happy: [[UInt16]] = [sprite_happy1, sprite_happy2]
     static let sleep: [[UInt16]] = [sprite_sleep1]
+    static let talk: [[UInt16]] = [sprite_talk1, sprite_talk2]
     // Walk reuses idle frames
     static let walk: [[UInt16]] = [sprite_idle1, sprite_idle3]
+    // Stretch reuses happy frames (same as firmware)
+    static let stretch: [[UInt16]] = [sprite_happy1, sprite_happy2]
+    // Look reuses idle frames (same as firmware)
+    static let look: [[UInt16]] = [sprite_idle1, sprite_idle2, sprite_idle1, sprite_idle3]
 }

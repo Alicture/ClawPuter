@@ -7,21 +7,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var behavior: PetBehavior!
     private var displayLink: CVDisplayLink?
     private var updateTimer: Timer?
+    private var udpListener: UDPListener!
 
     private let petSize: CGFloat = 128 // 16px * 8 scale
+    private let windowPadRight: CGFloat = 40  // Extra space for sleep Z overlay
+    private let windowPadTop: CGFloat = 48
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide dock icon — this is a background companion, not a regular app
         NSApp.setActivationPolicy(.accessory)
 
-        // Create pet components
+        // Create pet components — window is larger than sprite to fit Z overlay
+        let windowSize = NSSize(width: petSize + windowPadRight, height: petSize + windowPadTop)
         behavior = PetBehavior()
-        petView = PetView(frame: NSRect(x: 0, y: 0, width: petSize, height: petSize))
-        petWindow = PetWindow(size: NSSize(width: petSize, height: petSize))
+        petView = PetView(frame: NSRect(origin: .zero, size: windowSize))
+        petView.spriteSize = petSize
+        petWindow = PetWindow(size: windowSize)
         petWindow.contentView = petView
 
         // Initial render
-        petView.updateSprite(behavior.currentSprite(), facingLeft: behavior.facingLeft)
+        petView.updateSprite(behavior.currentSprite(), facingLeft: behavior.facingLeft, state: behavior.state)
         petWindow.orderFront(nil)
 
         // Position near center of screen initially
@@ -45,6 +50,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         RunLoop.current.add(updateTimer!, forMode: .common)
 
+        // Start UDP listener for Cardputer state sync
+        udpListener = UDPListener()
+        udpListener.onStateReceived = { [weak self] state, frame, mode in
+            // Already on main queue (UDPListener dispatches to main)
+            self?.behavior.applySync(state: state, frame: frame)
+        }
+        udpListener.start()
+
         // Menu bar status item for quit
         let statusBar = NSStatusBar.system
         let statusItem = statusBar.statusItem(withLength: NSStatusItem.squareLength)
@@ -63,7 +76,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         petWindow.setFrameOrigin(NSPoint(x: behavior.posX, y: behavior.posY))
 
         if needsRedraw {
-            petView.updateSprite(behavior.currentSprite(), facingLeft: behavior.facingLeft)
+            petView.updateSprite(behavior.currentSprite(), facingLeft: behavior.facingLeft, state: behavior.state)
         }
     }
 
