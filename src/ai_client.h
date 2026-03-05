@@ -24,7 +24,11 @@ public:
 
     bool isBusy() const { return busy; }
 
+    // Last AI response text (for TTS playback)
+    const String& getLastResponse() const { return lastResponse; }
+
 private:
+    String lastResponse;
     String apiKey;
     String gwHost;
     String gwPort;

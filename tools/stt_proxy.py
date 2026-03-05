@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Lightweight HTTP→HTTPS proxy for Groq Whisper STT API.
-ESP32 connects here over HTTP; this script forwards to Groq over HTTPS.
+Lightweight HTTP proxy for Groq Whisper STT and Edge TTS.
+ESP32 connects here over HTTP; STT is forwarded to Groq over HTTPS,
+TTS uses edge-tts locally and returns raw PCM audio.
 
 Usage:
     python3 tools/stt_proxy.py
@@ -10,6 +11,7 @@ Requires GROQ_API_KEY environment variable (reads from .env if present).
 Listens on port 8090 by default (change with STT_PROXY_PORT env var).
 """
 
+import json
 import os
 import sys
 import subprocess
@@ -38,6 +40,114 @@ if not GROQ_API_KEY:
 
 class ProxyHandler(BaseHTTPRequestHandler):
     def do_POST(self):
+        if self.path == "/v1/audio/speech":
+            return self.handle_tts()
+        return self.handle_stt()
+
+    def handle_tts(self):
+        """TTS endpoint: POST {"text":"...", "voice":"..."} → raw PCM (s16le, 16kHz, mono)"""
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+
+        try:
+            req = json.loads(body)
+            text = req.get("text", "").strip()
+            voice = req.get("voice", "zh-CN-XiaoxiaoNeural")
+
+            if not text:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error":"empty text"}')
+                return
+
+            print(f"  [TTS] text={text[:60]}... voice={voice}")
+
+            # Generate MP3 via edge-tts
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as mp3_f:
+                mp3_path = mp3_f.name
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pcm") as pcm_f:
+                pcm_path = pcm_f.name
+
+            try:
+                # Run edge-tts to produce MP3
+                result = subprocess.run(
+                    ["edge-tts", "--voice", voice, "--text", text, "--write-media", mp3_path],
+                    capture_output=True, timeout=30,
+                )
+                if result.returncode != 0:
+                    err = result.stderr.decode(errors="replace")[:200]
+                    print(f"  [TTS] edge-tts failed: {err}")
+                    self.send_response(500)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(f'{{"error":"edge-tts failed: {err}"}}'.encode())
+                    return
+
+                # Convert MP3 → raw PCM (signed 16-bit LE, 8kHz, mono)
+                # 8kHz = telephone quality, fine for tiny Cardputer speaker.
+                # Doubles duration capacity: 96KB buffer = 6s @ 8kHz vs 3s @ 16kHz.
+                result = subprocess.run(
+                    ["ffmpeg", "-y", "-i", mp3_path,
+                     "-f", "s16le", "-acodec", "pcm_s16le",
+                     "-ar", "8000", "-ac", "1", pcm_path],
+                    capture_output=True, timeout=30,
+                )
+                if result.returncode != 0:
+                    err = result.stderr.decode(errors="replace")[:200]
+                    print(f"  [TTS] ffmpeg failed: {err}")
+                    self.send_response(500)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(f'{{"error":"ffmpeg failed: {err}"}}'.encode())
+                    return
+
+                with open(pcm_path, "rb") as f:
+                    pcm_data = f.read()
+
+                # Truncate to ESP32 buffer size (96KB) with fade-out if needed
+                MAX_PCM_BYTES = 160000  # 80000 samples × 2 bytes = 10s @ 8kHz
+                if len(pcm_data) > MAX_PCM_BYTES:
+                    import array
+                    pcm_data = pcm_data[:MAX_PCM_BYTES]
+                    # Fade out last 0.2s (1600 samples at 8kHz = 3200 bytes)
+                    samples = array.array('h')
+                    samples.frombytes(pcm_data)
+                    fade_len = 1600
+                    fade_start = len(samples) - fade_len
+                    for i in range(fade_len):
+                        samples[fade_start + i] = int(samples[fade_start + i] * (1.0 - i / fade_len))
+                    pcm_data = samples.tobytes()
+                    print(f"  [TTS] Truncated to {MAX_PCM_BYTES} bytes with fade-out")
+
+                print(f"  [TTS] PCM: {len(pcm_data)} bytes ({len(pcm_data)/16000:.1f}s @ 8kHz)")
+
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(pcm_data)))
+                self.end_headers()
+                self.wfile.write(pcm_data)
+
+            finally:
+                for p in (mp3_path, pcm_path):
+                    try:
+                        os.unlink(p)
+                    except Exception:
+                        pass
+
+        except json.JSONDecodeError:
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"error":"invalid JSON"}')
+        except Exception as e:
+            print(f"  [TTS] Error: {e}")
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(f'{{"error":"{e}"}}'.encode())
+
+    def handle_stt(self):
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length)
 
@@ -103,9 +213,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     server = HTTPServer(("0.0.0.0", PORT), ProxyHandler)
-    print(f"STT Proxy listening on 0.0.0.0:{PORT}")
+    print(f"STT/TTS Proxy listening on 0.0.0.0:{PORT}")
     print(f"Groq key: {GROQ_API_KEY[:10]}...")
-    print(f"Forwarding to: api.groq.com/openai/v1/audio/transcriptions")
+    print(f"  STT: POST /v1/audio/transcriptions → Groq")
+    print(f"  TTS: POST /v1/audio/speech → edge-tts + ffmpeg")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

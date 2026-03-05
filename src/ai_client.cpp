@@ -232,6 +232,9 @@ void AIClient::sendMessage(const String& userMessage,
 
     if (fullResponse.length() > 0) {
         addToHistory(userMessage, fullResponse);
+        lastResponse = fullResponse;
+    } else {
+        lastResponse = "";
     }
 
     busy = false;

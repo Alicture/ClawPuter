@@ -8,6 +8,7 @@
 #include "ai_client.h"
 #include "state_broadcast.h"
 #include "voice_input.h"
+#include "tts_playback.h"
 
 // ── Build-time defaults (may be empty if not set in .env) ──
 #ifndef WIFI_SSID
@@ -50,6 +51,7 @@ Companion companion;
 Chat chat;
 AIClient aiClient;
 VoiceInput voiceInput;
+TTSPlayback ttsPlayback;
 
 enum class AppMode { SETUP, COMPANION, CHAT };
 static AppMode appMode = AppMode::SETUP;
@@ -198,7 +200,8 @@ void loop() {
 
             // ── Voice input: Fn push-to-talk (only when online) ──
             if (!offlineMode && fnDown && fnAlone && !voiceInput.isRecording()
-                && !aiClient.isBusy() && !voiceInput.isTranscribing()) {
+                && !aiClient.isBusy() && !voiceInput.isTranscribing()
+                && !ttsPlayback.isPlaying()) {
                 voiceInput.startRecording();
             }
             if (fnUp && voiceInput.isRecording()) {
@@ -277,6 +280,7 @@ void loop() {
                     Serial.printf("[CHAT] Sending: %s\n", msg.c_str());
                     companion.triggerTalk();
 
+                    bool aiError = false;
                     aiClient.sendMessage(msg,
                         // onToken — receives const char* (zero heap allocation)
                         [](const char* token) {
@@ -291,29 +295,58 @@ void loop() {
                             chat.update(canvas);
                             canvas.pushSprite(0, 0);
                         },
-                        // onDone
+                        // onDone — don't triggerIdle yet, TTS may follow
                         []() {
                             chat.onAIResponseComplete();
-                            companion.triggerIdle();
                         },
                         // onError
-                        [](const String& error) {
+                        [&aiError](const String& error) {
                             // Build error string on stack to avoid heap allocation
                             char errBuf[64];
                             snprintf(errBuf, sizeof(errBuf), "[Error: %s]", error.c_str());
                             chat.appendAIToken(errBuf);
                             chat.onAIResponseComplete();
-                            companion.triggerIdle();
+                            aiError = true;
                         }
                     );
+
+                    // TTS: speak the AI response (sendMessage is blocking, so we're here after it completes)
+                    if (!aiError && aiClient.getLastResponse().length() > 0) {
+                        // Show "Speaking..." indicator while downloading PCM
+                        chat.update(canvas);
+                        ttsPlayback.drawSpeakingBar(canvas);
+                        canvas.pushSprite(0, 0);
+
+                        ttsPlayback.requestAndPlay(aiClient.getLastResponse().c_str());
+                        // playRaw is non-blocking (DMA queue), returns immediately
+                    }
+                    companion.triggerIdle();
+
+                    // Resync keyboard after blocking AI + TTS download.
+                    // Without this, the Enter that sent the message still has
+                    // enterDown=true in this iteration, immediately stopping TTS.
+                    M5Cardputer.update();
+                    ks = M5Cardputer.Keyboard.keysState();
+                    pFn = ks.fn; pEnter = ks.enter; pDel = ks.del; pTab = ks.tab;
+                    pWordChar = (ks.word.size() > 0) ? ks.word[0] : 0;
+                    enterDown = delDown = tabDown = charDown = false;
+                    fnDown = false;
                 }
+            }
+
+            // ── Stop TTS on any key press ──
+            if (ttsPlayback.isPlaying() && (enterDown || delDown || tabDown || charDown || fnDown)) {
+                ttsPlayback.stop();
+                Serial.println("[TTS] Playback interrupted by key press");
             }
 
             // ── Draw ──
             chat.update(canvas);
-            // Override input bar if recording or transcribing
+            // Override input bar if recording, transcribing, or speaking
             if (voiceInput.isRecording()) {
                 voiceInput.drawRecordingBar(canvas);
+            } else if (ttsPlayback.isPlaying()) {
+                ttsPlayback.drawSpeakingBar(canvas);
             }
             canvas.pushSprite(0, 0);
             break;
@@ -686,6 +719,10 @@ void initOnlineServices(bool usedSecondary) {
 
     // Init voice input
     voiceInput.begin(sttHost, sttPort);
+
+    // Init TTS playback — reuses voice input's buffer (mic & speaker share GPIO 43)
+    ttsPlayback.begin(sttHost, sttPort,
+                      voiceInput.getBuffer(), voiceInput.getMaxSamples());
 }
 
 void enterCompanionMode() {
