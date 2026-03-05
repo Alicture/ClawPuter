@@ -6,9 +6,14 @@ static WiFiUDP udp;
 static Timer broadcastTimer{200}; // 5Hz
 
 static constexpr uint16_t BROADCAST_PORT = 19820;
+static char unicastHost[64] = {0};
 
-void stateBroadcastBegin() {
+void stateBroadcastBegin(const char* target) {
     udp.begin(BROADCAST_PORT);
+    if (target && strlen(target) > 0) {
+        strncpy(unicastHost, target, sizeof(unicastHost) - 1);
+        unicastHost[sizeof(unicastHost) - 1] = '\0';
+    }
 }
 
 void stateBroadcastTick(int state, int frame, const char* mode) {
@@ -17,7 +22,15 @@ void stateBroadcastTick(int state, int frame, const char* mode) {
     char buf[64];
     int len = snprintf(buf, sizeof(buf), "{\"s\":%d,\"f\":%d,\"m\":\"%s\"}", state, frame, mode);
 
+    // Broadcast (works on normal routers)
     udp.beginPacket("255.255.255.255", BROADCAST_PORT);
     udp.write((const uint8_t*)buf, len);
     udp.endPacket();
+
+    // Unicast to gateway host (works on iPhone hotspot)
+    if (unicastHost[0]) {
+        udp.beginPacket(unicastHost, BROADCAST_PORT);
+        udp.write((const uint8_t*)buf, len);
+        udp.endPacket();
+    }
 }

@@ -12,6 +12,15 @@
 - [x] 桌面宠物同步 — macOS 端 Swift 桌面宠物，通过 UDP 接收 Cardputer 状态
 - [x] OpenClaw 集成 — 局域网连接 OpenClaw Gateway，多模型自动切换
 
+## Phase 4.5：演示 & 离线体验
+
+- [ ] 运行时可配置 Gateway/STT — 编译时值作为默认，Fn+R 向导可修改，重启后保持
+- [ ] 备用 WiFi 自动降级 — 主 WiFi（家里）连不上自动尝试备用（手机热点），编译时配置两套
+- [ ] 备用 Gateway Host — 连上备用 WiFi 时自动切换 Gateway IP（热点网络 Mac IP 不同）
+- [ ] Setup 向导可取消 — Tab 退出向导回到 Companion 模式
+- [ ] WiFi 连接失败不死循环 — 所有 WiFi 都失败后提供选择：重试 / 进 Setup 改配置 / 跳过进入离线模式（而非当前的无限重试）
+- [ ] 离线模式 — 跳过联网后 Companion 模式正常可用（动画、时钟、音效），Chat 模式显示离线提示
+
 ## Phase 5：体验打磨
 
 - [ ] TTS 语音回复 — AI 回复通过扬声器播放

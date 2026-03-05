@@ -9,6 +9,41 @@
 #include "state_broadcast.h"
 #include "voice_input.h"
 
+// ── Build-time defaults (may be empty if not set in .env) ──
+#ifndef WIFI_SSID
+#define WIFI_SSID ""
+#endif
+#ifndef WIFI_PASS
+#define WIFI_PASS ""
+#endif
+#ifndef CLAUDE_API_KEY
+#define CLAUDE_API_KEY ""
+#endif
+#ifndef OPENCLAW_HOST
+#define OPENCLAW_HOST ""
+#endif
+#ifndef OPENCLAW_PORT
+#define OPENCLAW_PORT ""
+#endif
+#ifndef OPENCLAW_TOKEN
+#define OPENCLAW_TOKEN ""
+#endif
+#ifndef STT_PROXY_HOST
+#define STT_PROXY_HOST ""
+#endif
+#ifndef STT_PROXY_PORT
+#define STT_PROXY_PORT "8090"
+#endif
+#ifndef WIFI_SSID2
+#define WIFI_SSID2 ""
+#endif
+#ifndef WIFI_PASS2
+#define WIFI_PASS2 ""
+#endif
+#ifndef OPENCLAW_HOST2
+#define OPENCLAW_HOST2 ""
+#endif
+
 // ── Globals ──
 M5Canvas canvas(&M5Cardputer.Display);
 Companion companion;
@@ -18,9 +53,10 @@ VoiceInput voiceInput;
 
 enum class AppMode { SETUP, COMPANION, CHAT };
 static AppMode appMode = AppMode::SETUP;
+static bool offlineMode = false;
 
 // ── Setup mode state ──
-enum class SetupStep { SSID, PASSWORD, API_KEY, CONNECTING };
+enum class SetupStep { SSID, PASSWORD, GATEWAY_HOST, GATEWAY_PORT, GATEWAY_TOKEN, STT_HOST, CONNECTING };
 static SetupStep setupStep = SetupStep::SSID;
 static String setupInput;
 
@@ -30,10 +66,13 @@ static const long  GMT_OFFSET_SEC = 8 * 3600;  // UTC+8 for China
 static const int   DAYLIGHT_OFFSET_SEC = 0;
 
 // ── Forward declarations ──
+void fillBuildTimeDefaults();
 void enterSetupMode();
 void updateSetupMode();
-void handleSetupKey(char key, bool enter, bool backspace);
+void handleSetupKey(char key, bool enter, bool backspace, bool tab);
+bool tryConnect(const String& ssid, const String& pass);
 void connectWiFi();
+void initOnlineServices(bool usedSecondary);
 void enterCompanionMode();
 void enterChatMode();
 
@@ -51,36 +90,46 @@ void setup() {
     canvas.createSprite(SCREEN_W, SCREEN_H);
     canvas.setTextWrap(false);
 
-    // Try build-time credentials first, then NVS, then setup wizard
+    // Load NVS, then fill empty fields with build-time defaults
     Config::load();
-
-    #if defined(WIFI_SSID) && defined(WIFI_PASS)
-    if (strlen(WIFI_SSID) > 0) {
-        Config::setSSID(WIFI_SSID);
-        Config::setPassword(WIFI_PASS);
-        #ifdef CLAUDE_API_KEY
-        if (strlen(CLAUDE_API_KEY) > 0) {
-            Config::setApiKey(CLAUDE_API_KEY);
-        }
-        #endif
-        Config::save();
-    }
-    #endif
+    fillBuildTimeDefaults();
+    Config::save();
 
     // Play boot animation
     playBootAnimation(canvas);
 
     if (Config::isValid()) {
-        canvas.fillScreen(Color::BG_DAY);
-        canvas.setTextColor(Color::CLOCK_TEXT);
-        canvas.setTextSize(1);
-        canvas.drawString("Connecting to WiFi...", 40, 60);
-        canvas.pushSprite(0, 0);
-
         connectWiFi();
     } else {
         enterSetupMode();
     }
+}
+
+// Fill NVS fields that are empty with build-time compile values.
+// Does NOT overwrite user-modified values.
+void fillBuildTimeDefaults() {
+    if (Config::getSSID().length() == 0 && strlen(WIFI_SSID) > 0)
+        Config::setSSID(WIFI_SSID);
+    if (Config::getPassword().length() == 0 && strlen(WIFI_PASS) > 0)
+        Config::setPassword(WIFI_PASS);
+    if (Config::getApiKey().length() == 0 && strlen(CLAUDE_API_KEY) > 0)
+        Config::setApiKey(CLAUDE_API_KEY);
+    if (Config::getGatewayHost().length() == 0 && strlen(OPENCLAW_HOST) > 0)
+        Config::setGatewayHost(OPENCLAW_HOST);
+    if (Config::getGatewayPort().length() == 0 && strlen(OPENCLAW_PORT) > 0)
+        Config::setGatewayPort(OPENCLAW_PORT);
+    if (Config::getGatewayToken().length() == 0 && strlen(OPENCLAW_TOKEN) > 0)
+        Config::setGatewayToken(OPENCLAW_TOKEN);
+    if (Config::getSttHost().length() == 0 && strlen(STT_PROXY_HOST) > 0)
+        Config::setSttHost(STT_PROXY_HOST);
+    if (Config::getSttPort().length() == 0 && strlen(STT_PROXY_PORT) > 0)
+        Config::setSttPort(STT_PROXY_PORT);
+    if (Config::getSSID2().length() == 0 && strlen(WIFI_SSID2) > 0)
+        Config::setSSID2(WIFI_SSID2);
+    if (Config::getPassword2().length() == 0 && strlen(WIFI_PASS2) > 0)
+        Config::setPassword2(WIFI_PASS2);
+    if (Config::getGatewayHost2().length() == 0 && strlen(OPENCLAW_HOST2) > 0)
+        Config::setGatewayHost2(OPENCLAW_HOST2);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -99,9 +148,10 @@ void loop() {
             if (keyPressed) {
                 bool enter = keys.enter;
                 bool backspace = keys.del;
+                bool tab = keys.tab;
                 char key = 0;
                 if (keys.word.size() > 0) key = keys.word[0];
-                handleSetupKey(key, enter, backspace);
+                handleSetupKey(key, enter, backspace, tab);
             }
             updateSetupMode();
             break;
@@ -115,7 +165,10 @@ void loop() {
                 }
                 // Fn+R = reset config
                 if (keys.fn && keys.word.size() > 0 && keys.word[0] == 'r') {
+                    WiFi.disconnect(true);  // Clear ESP32 internal WiFi cache
                     Config::reset();
+                    fillBuildTimeDefaults();
+                    Config::save();
                     enterSetupMode();
                     break;
                 }
@@ -143,8 +196,8 @@ void loop() {
             bool fnAlone = ks.fn && ks.word.size() == 0
                            && !ks.tab && !ks.enter && !ks.del;
 
-            // ── Voice input: Fn push-to-talk ──
-            if (fnDown && fnAlone && !voiceInput.isRecording()
+            // ── Voice input: Fn push-to-talk (only when online) ──
+            if (!offlineMode && fnDown && fnAlone && !voiceInput.isRecording()
                 && !aiClient.isBusy() && !voiceInput.isTranscribing()) {
                 voiceInput.startRecording();
             }
@@ -214,39 +267,46 @@ void loop() {
 
             // Check if chat has a message to send
             if (chat.hasPendingMessage() && !aiClient.isBusy()) {
-                String msg = chat.takePendingMessage();
-                Serial.printf("[CHAT] Sending: %s\n", msg.c_str());
-                companion.triggerTalk();
+                if (offlineMode) {
+                    // Offline: show error message instead of attempting AI request
+                    String msg = chat.takePendingMessage();
+                    chat.appendAIToken("[Offline] No network connection");
+                    chat.onAIResponseComplete();
+                } else {
+                    String msg = chat.takePendingMessage();
+                    Serial.printf("[CHAT] Sending: %s\n", msg.c_str());
+                    companion.triggerTalk();
 
-                aiClient.sendMessage(msg,
-                    // onToken — receives const char* (zero heap allocation)
-                    [](const char* token) {
-                        chat.appendAIToken(token);
-                        // Typing sound — short chirp, throttled
-                        static unsigned long lastBeep = 0;
-                        if (millis() - lastBeep > 80) {
-                            M5Cardputer.Speaker.tone(1800, 15);
-                            lastBeep = millis();
+                    aiClient.sendMessage(msg,
+                        // onToken — receives const char* (zero heap allocation)
+                        [](const char* token) {
+                            chat.appendAIToken(token);
+                            // Typing sound — short chirp, throttled
+                            static unsigned long lastBeep = 0;
+                            if (millis() - lastBeep > 80) {
+                                M5Cardputer.Speaker.tone(1800, 15);
+                                lastBeep = millis();
+                            }
+                            // Redraw while streaming
+                            chat.update(canvas);
+                            canvas.pushSprite(0, 0);
+                        },
+                        // onDone
+                        []() {
+                            chat.onAIResponseComplete();
+                            companion.triggerIdle();
+                        },
+                        // onError
+                        [](const String& error) {
+                            // Build error string on stack to avoid heap allocation
+                            char errBuf[64];
+                            snprintf(errBuf, sizeof(errBuf), "[Error: %s]", error.c_str());
+                            chat.appendAIToken(errBuf);
+                            chat.onAIResponseComplete();
+                            companion.triggerIdle();
                         }
-                        // Redraw while streaming
-                        chat.update(canvas);
-                        canvas.pushSprite(0, 0);
-                    },
-                    // onDone
-                    []() {
-                        chat.onAIResponseComplete();
-                        companion.triggerIdle();
-                    },
-                    // onError
-                    [](const String& error) {
-                        // Build error string on stack to avoid heap allocation
-                        char errBuf[64];
-                        snprintf(errBuf, sizeof(errBuf), "[Error: %s]", error.c_str());
-                        chat.appendAIToken(errBuf);
-                        chat.onAIResponseComplete();
-                        companion.triggerIdle();
-                    }
-                );
+                    );
+                }
             }
 
             // ── Draw ──
@@ -260,18 +320,19 @@ void loop() {
         }
     }
 
-    // Broadcast state over UDP for desktop sync
-    const char* modeStr = "COMPANION";
-    if (appMode == AppMode::CHAT) modeStr = "CHAT";
-    else if (appMode == AppMode::SETUP) modeStr = "SETUP";
-    stateBroadcastTick(static_cast<int>(companion.getState()),
-                       companion.getFrameIndex(), modeStr);
+    // Broadcast state over UDP for desktop sync (skip if offline or not yet initialized)
+    if (!offlineMode && appMode != AppMode::SETUP) {
+        const char* modeStr = "COMPANION";
+        if (appMode == AppMode::CHAT) modeStr = "CHAT";
+        stateBroadcastTick(static_cast<int>(companion.getState()),
+                           companion.getFrameIndex(), modeStr);
+    }
 
     delay(16); // ~60fps cap
 }
 
 // ══════════════════════════════════════════════════════════════
-// Setup Mode
+// Setup Mode — redesigned with default value display + Tab cancel
 // ══════════════════════════════════════════════════════════════
 
 void enterSetupMode() {
@@ -280,26 +341,45 @@ void enterSetupMode() {
     setupInput = "";
 }
 
+// Helper: get display hint for current value (for setup screen)
+static void getDefaultHint(char* buf, int bufSize, const String& value, bool isPassword) {
+    if (value.length() == 0) {
+        snprintf(buf, bufSize, "(empty)");
+    } else if (isPassword) {
+        snprintf(buf, bufSize, "[%d chars set]", value.length());
+    } else {
+        snprintf(buf, bufSize, "[%s]", value.c_str());
+    }
+}
+
 void updateSetupMode() {
     canvas.fillScreen(Color::BG_DAY);
     canvas.setTextColor(Color::CLOCK_TEXT);
     canvas.setTextSize(1);
 
-    canvas.drawString("=== Setup ===", 70, 8);
+    canvas.drawString("=== Setup ===", 70, 4);
+
+    char hint[64];
 
     switch (setupStep) {
         case SetupStep::SSID:
-            canvas.drawString("WiFi SSID:", 10, 35);
-            canvas.setTextColor(Color::WHITE);
-            canvas.drawString((setupInput + "_").c_str(), 10, 50);
+            canvas.drawString("WiFi SSID:", 10, 25);
+            getDefaultHint(hint, sizeof(hint), Config::getSSID(), false);
             canvas.setTextColor(Color::STATUS_DIM);
-            canvas.drawString("[Enter] confirm  [Backspace] delete", 10, 75);
+            canvas.drawString(hint, 80, 25);
+            canvas.setTextColor(Color::WHITE);
+            canvas.drawString((setupInput + "_").c_str(), 10, 42);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString("[Enter] keep/confirm", 10, 62);
+            canvas.drawString("[Tab] cancel", 170, 62);
             break;
 
         case SetupStep::PASSWORD:
-            canvas.drawString("WiFi Password:", 10, 35);
+            canvas.drawString("WiFi Password:", 10, 25);
+            getDefaultHint(hint, sizeof(hint), Config::getPassword(), true);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString(hint, 100, 25);
             canvas.setTextColor(Color::WHITE);
-            // Show asterisks for password — stack buffer, no heap allocation
             {
                 char masked[64];
                 int len = setupInput.length();
@@ -307,25 +387,65 @@ void updateSetupMode() {
                 memset(masked, '*', len);
                 masked[len] = '_';
                 masked[len + 1] = '\0';
-                canvas.drawString(masked, 10, 50);
+                canvas.drawString(masked, 10, 42);
             }
             canvas.setTextColor(Color::STATUS_DIM);
-            canvas.drawString("[Enter] confirm", 10, 75);
+            canvas.drawString("[Enter] keep/confirm", 10, 62);
+            canvas.drawString("[Tab] cancel", 170, 62);
             break;
 
-        case SetupStep::API_KEY:
-            canvas.drawString("Claude API Key:", 10, 35);
+        case SetupStep::GATEWAY_HOST:
+            canvas.drawString("Gateway Host:", 10, 25);
+            getDefaultHint(hint, sizeof(hint), Config::getGatewayHost(), false);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString(hint, 100, 25);
+            canvas.setTextColor(Color::WHITE);
+            canvas.drawString((setupInput + "_").c_str(), 10, 42);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString("[Enter] keep/confirm", 10, 62);
+            canvas.drawString("[Tab] cancel", 170, 62);
+            break;
+
+        case SetupStep::GATEWAY_PORT:
+            canvas.drawString("Gateway Port:", 10, 25);
+            getDefaultHint(hint, sizeof(hint), Config::getGatewayPort(), false);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString(hint, 100, 25);
+            canvas.setTextColor(Color::WHITE);
+            canvas.drawString((setupInput + "_").c_str(), 10, 42);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString("[Enter] keep/confirm", 10, 62);
+            canvas.drawString("[Tab] cancel", 170, 62);
+            break;
+
+        case SetupStep::GATEWAY_TOKEN:
+            canvas.drawString("Gateway Token:", 10, 25);
+            getDefaultHint(hint, sizeof(hint), Config::getGatewayToken(), true);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString(hint, 105, 25);
             canvas.setTextColor(Color::WHITE);
             {
                 String display = setupInput + "_";
-                // Show last 20 chars if too long
                 if (display.length() > 35) {
                     display = "..." + display.substring(display.length() - 32);
                 }
-                canvas.drawString(display.c_str(), 10, 50);
+                canvas.drawString(display.c_str(), 10, 42);
             }
             canvas.setTextColor(Color::STATUS_DIM);
-            canvas.drawString("[Enter] confirm  (or empty to skip)", 10, 75);
+            canvas.drawString("[Enter] keep/confirm", 10, 62);
+            canvas.drawString("[Tab] cancel", 170, 62);
+            break;
+
+        case SetupStep::STT_HOST:
+            canvas.drawString("STT Proxy Host:", 10, 25);
+            getDefaultHint(hint, sizeof(hint), Config::getSttHost(), false);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString(hint, 110, 25);
+            canvas.setTextColor(Color::WHITE);
+            canvas.drawString((setupInput + "_").c_str(), 10, 42);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString("[Enter] keep/confirm", 10, 62);
+            canvas.drawString("[Tab] cancel", 170, 62);
             break;
 
         case SetupStep::CONNECTING:
@@ -342,7 +462,14 @@ void updateSetupMode() {
     canvas.pushSprite(0, 0);
 }
 
-void handleSetupKey(char key, bool enter, bool backspace) {
+void handleSetupKey(char key, bool enter, bool backspace, bool tab) {
+    // Tab = exit setup, go back to companion
+    if (tab) {
+        if (WiFi.status() != WL_CONNECTED) offlineMode = true;
+        enterCompanionMode();
+        return;
+    }
+
     if (backspace && setupInput.length() > 0) {
         setupInput.remove(setupInput.length() - 1);
         return;
@@ -355,23 +482,54 @@ void handleSetupKey(char key, bool enter, bool backspace) {
 
     if (!enter) return;
 
+    // Enter pressed — empty input means "keep current value"
     switch (setupStep) {
         case SetupStep::SSID:
             if (setupInput.length() > 0) {
                 Config::setSSID(setupInput);
-                setupInput = "";
-                setupStep = SetupStep::PASSWORD;
             }
+            // If empty and current SSID is also empty, stay on this step
+            if (Config::getSSID().length() == 0) break;
+            setupInput = "";
+            setupStep = SetupStep::PASSWORD;
             break;
 
         case SetupStep::PASSWORD:
-            Config::setPassword(setupInput);
+            if (setupInput.length() > 0) {
+                Config::setPassword(setupInput);
+            }
             setupInput = "";
-            setupStep = SetupStep::API_KEY;
+            setupStep = SetupStep::GATEWAY_HOST;
             break;
 
-        case SetupStep::API_KEY:
-            Config::setApiKey(setupInput);
+        case SetupStep::GATEWAY_HOST:
+            if (setupInput.length() > 0) {
+                Config::setGatewayHost(setupInput);
+            }
+            setupInput = "";
+            setupStep = SetupStep::GATEWAY_PORT;
+            break;
+
+        case SetupStep::GATEWAY_PORT:
+            if (setupInput.length() > 0) {
+                Config::setGatewayPort(setupInput);
+            }
+            setupInput = "";
+            setupStep = SetupStep::GATEWAY_TOKEN;
+            break;
+
+        case SetupStep::GATEWAY_TOKEN:
+            if (setupInput.length() > 0) {
+                Config::setGatewayToken(setupInput);
+            }
+            setupInput = "";
+            setupStep = SetupStep::STT_HOST;
+            break;
+
+        case SetupStep::STT_HOST:
+            if (setupInput.length() > 0) {
+                Config::setSttHost(setupInput);
+            }
             Config::save();
             setupInput = "";
             setupStep = SetupStep::CONNECTING;
@@ -383,11 +541,20 @@ void handleSetupKey(char key, bool enter, bool backspace) {
     }
 }
 
-void connectWiFi() {
-    WiFi.begin(Config::getSSID().c_str(), Config::getPassword().c_str());
+// ══════════════════════════════════════════════════════════════
+// WiFi connection — dual WiFi + failure handling
+// ══════════════════════════════════════════════════════════════
+
+// Try connecting to a single WiFi network. Returns true on success.
+bool tryConnect(const String& ssid, const String& pass) {
+    Serial.printf("[WIFI] Trying %s...\n", ssid.c_str());
+
+    WiFi.disconnect(true);
+    delay(100);
+    WiFi.begin(ssid.c_str(), pass.c_str());
 
     int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    while (WiFi.status() != WL_CONNECTED && attempts < 30) {  // 15 seconds
         delay(500);
         attempts++;
 
@@ -395,55 +562,130 @@ void connectWiFi() {
         canvas.fillScreen(Color::BG_DAY);
         canvas.setTextColor(Color::CLOCK_TEXT);
         canvas.setTextSize(1);
-        static const char* dots[] = {"Connecting.", "Connecting..", "Connecting...", "Connecting...."};
-        canvas.drawString(dots[attempts % 4], 70, 55);
+
+        char msg[64];
+        static const char* dotSuffix[] = {".", "..", "...", "...."};
+        snprintf(msg, sizeof(msg), "Connecting to %s%s", ssid.c_str(), dotSuffix[attempts % 4]);
+        // Truncate if too long for screen, respecting UTF-8 boundaries
+        if (strlen(msg) > 38) {
+            int cut = 38;
+            while (cut > 0 && (msg[cut] & 0xC0) == 0x80) cut--;
+            msg[cut] = '\0';
+        }
+        canvas.drawString(msg, 10, 55);
         canvas.pushSprite(0, 0);
     }
 
-    if (WiFi.status() == WL_CONNECTED) {
-        // Sync time
-        configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
+    bool connected = (WiFi.status() == WL_CONNECTED);
+    Serial.printf("[WIFI] %s: %s\n", ssid.c_str(), connected ? "OK" : "FAILED");
+    return connected;
+}
 
-        // Show success briefly
-        canvas.fillScreen(Color::BG_DAY);
-        canvas.setTextColor(Color::CHAT_AI);
-        canvas.setTextSize(1);
-        canvas.drawString("WiFi connected!", 70, 50);
-        canvas.drawString(WiFi.localIP().toString().c_str(), 80, 65);
-        canvas.pushSprite(0, 0);
-        delay(1000);
+void connectWiFi() {
+    offlineMode = false;
 
-        // Init state broadcast (UDP)
-        stateBroadcastBegin();
+    while (true) {
+        // Try primary WiFi
+        bool connected = tryConnect(Config::getSSID(), Config::getPassword());
 
-        // Init AI client
-        if (Config::getApiKey().length() > 0) {
-            aiClient.begin(Config::getApiKey());
+        // Try secondary WiFi if primary failed and secondary is configured
+        bool usedSecondary = false;
+        if (!connected && Config::getSSID2().length() > 0) {
+            connected = tryConnect(Config::getSSID2(), Config::getPassword2());
+            if (connected) usedSecondary = true;
         }
 
-        // Init voice input
-        voiceInput.begin();
+        if (connected) {
+            initOnlineServices(usedSecondary);
+            enterCompanionMode();
+            return;
+        }
 
-        enterCompanionMode();
-    } else {
-        // Connection failed
+        // WiFi failed — show options menu
         canvas.fillScreen(Color::BG_DAY);
         canvas.setTextColor(rgb565(220, 80, 80));
         canvas.setTextSize(1);
-        canvas.drawString("WiFi failed!", 75, 50);
-        canvas.drawString("Press any key to retry", 50, 70);
+        canvas.drawString("WiFi failed!", 80, 20);
+
+        canvas.setTextColor(Color::CLOCK_TEXT);
+        canvas.drawString("[Enter]  Retry", 60, 48);
+        canvas.drawString("[Fn+R]   Setup wizard", 60, 63);
+        canvas.drawString("[Tab]    Offline mode", 60, 78);
         canvas.pushSprite(0, 0);
 
-        // Wait for keypress then restart setup
+        // Wait for user choice
+        bool retry = false;
         while (true) {
             M5Cardputer.update();
             if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
-                enterSetupMode();
-                return;
+                auto ks = M5Cardputer.Keyboard.keysState();
+
+                if (ks.enter) {
+                    retry = true;
+                    break;  // break inner loop, outer loop retries
+                }
+                if (ks.fn && ks.word.size() > 0 && ks.word[0] == 'r') {
+                    // Reset + setup wizard
+                    WiFi.disconnect(true);
+                    Config::reset();
+                    fillBuildTimeDefaults();
+                    Config::save();
+                    enterSetupMode();
+                    return;
+                }
+                if (ks.tab) {
+                    // Enter offline mode
+                    offlineMode = true;
+                    Serial.println("[WIFI] Entering offline mode");
+                    enterCompanionMode();
+                    return;
+                }
             }
             delay(50);
         }
+        if (!retry) return;  // safety: should not reach here
     }
+}
+
+// Initialize NTP, state broadcast, AI client, and voice input
+void initOnlineServices(bool usedSecondary) {
+    // Sync time
+    configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
+
+    // Show success briefly
+    canvas.fillScreen(Color::BG_DAY);
+    canvas.setTextColor(Color::CHAT_AI);
+    canvas.setTextSize(1);
+    canvas.drawString("WiFi connected!", 70, 50);
+    canvas.drawString(WiFi.localIP().toString().c_str(), 80, 65);
+    canvas.pushSprite(0, 0);
+    delay(1000);
+
+    // Use secondary gateway host if connected via secondary WiFi
+    String gwHost = Config::getGatewayHost();
+    String sttHost = Config::getSttHost();
+    if (usedSecondary && Config::getGatewayHost2().length() > 0) {
+        String primaryGwHost = gwHost;
+        gwHost = Config::getGatewayHost2();
+        Serial.printf("[WIFI] Using secondary gateway: %s\n", gwHost.c_str());
+        // If STT host was same as primary gateway, switch it too
+        if (sttHost == primaryGwHost) {
+            sttHost = gwHost;
+            Serial.printf("[WIFI] STT host also switched to: %s\n", sttHost.c_str());
+        }
+    }
+
+    // Init state broadcast (UDP) — broadcast + unicast to gateway host
+    stateBroadcastBegin(gwHost.c_str());
+    String gwPort = Config::getGatewayPort();
+    String gwToken = Config::getGatewayToken();
+    String sttPort = Config::getSttPort();
+
+    // Init AI client
+    aiClient.begin(Config::getApiKey(), gwHost, gwPort, gwToken);
+
+    // Init voice input
+    voiceInput.begin(sttHost, sttPort);
 }
 
 void enterCompanionMode() {

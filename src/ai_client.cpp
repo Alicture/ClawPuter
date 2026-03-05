@@ -4,19 +4,12 @@
 #include <WiFiClient.h>
 #include <ArduinoJson.h>
 
-// OpenClaw Gateway on LAN — configure via environment variables
-#ifndef OPENCLAW_HOST
-#define OPENCLAW_HOST ""
-#endif
-#ifndef OPENCLAW_PORT
-#define OPENCLAW_PORT ""
-#endif
-#ifndef OPENCLAW_TOKEN
-#define OPENCLAW_TOKEN ""
-#endif
-
-void AIClient::begin(const String& key) {
+void AIClient::begin(const String& key, const String& host,
+                     const String& port, const String& token) {
     apiKey = key;
+    gwHost = host;
+    gwPort = port;
+    gwToken = token;
     historyCount = 0;
     // Pre-reserve history Strings to avoid per-round realloc fragmentation
     for (int i = 0; i < MAX_HISTORY; i++) {
@@ -38,10 +31,16 @@ void AIClient::sendMessage(const String& userMessage,
     WiFiClient client;
     client.setTimeout(5);  // 5s per read operation
 
-    int port = atoi(OPENCLAW_PORT);
-    Serial.printf("[AI] Connecting to %s:%d...\n", OPENCLAW_HOST, port);
+    int port = atoi(gwPort.c_str());
+    if (port <= 0 || port > 65535) {
+        Serial.println("[AI] Invalid port");
+        busy = false;
+        if (onError) onError("Invalid port");
+        return;
+    }
+    Serial.printf("[AI] Connecting to %s:%d...\n", gwHost.c_str(), port);
 
-    if (!client.connect(OPENCLAW_HOST, port)) {
+    if (!client.connect(gwHost.c_str(), port)) {
         Serial.println("[AI] Connection failed");
         busy = false;
         if (onError) onError("Connection failed");
@@ -58,9 +57,9 @@ void AIClient::sendMessage(const String& userMessage,
                       "Host: %s:%s\r\n"
                       "Authorization: Bearer %s\r\n"
                       "Content-Type: application/json\r\n"
-                      "Content-Length: %d\r\n"
+                      "Content-Length: %u\r\n"
                       "Connection: close\r\n\r\n",
-                      OPENCLAW_HOST, OPENCLAW_PORT, OPENCLAW_TOKEN, bodyLen);
+                      gwHost.c_str(), gwPort.c_str(), gwToken.c_str(), bodyLen);
         serializeJson(doc, client);
     } // doc freed here
 

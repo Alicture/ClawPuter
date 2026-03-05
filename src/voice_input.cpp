@@ -2,14 +2,9 @@
 #include "config.h"
 #include <WiFiClient.h>
 
-#ifndef STT_PROXY_HOST
-#define STT_PROXY_HOST ""
-#endif
-#ifndef STT_PROXY_PORT
-#define STT_PROXY_PORT "8090"
-#endif
-
-void VoiceInput::begin() {
+void VoiceInput::begin(const String& host, const String& port) {
+    sttHostStr = host;
+    sttPortStr = port;
     maxSamples = (size_t)(SAMPLE_RATE * MAX_RECORD_SEC);
     // Allocate buffer once at startup and keep it permanently.
     // Heap is least fragmented now; freeing and re-allocating later fails
@@ -200,10 +195,14 @@ String VoiceInput::sendToSTT(const int16_t* data, size_t sampleCount) {
     WiFiClient client;
     client.setTimeout(30);
 
-    int port = atoi(STT_PROXY_PORT);
-    Serial.printf("[VOICE] Connecting to STT proxy %s:%d...\n", STT_PROXY_HOST, port);
+    int port = atoi(sttPortStr.c_str());
+    if (port <= 0 || port > 65535) {
+        Serial.println("[VOICE] Invalid STT port");
+        return "";
+    }
+    Serial.printf("[VOICE] Connecting to STT proxy %s:%d...\n", sttHostStr.c_str(), port);
 
-    if (!client.connect(STT_PROXY_HOST, port)) {
+    if (!client.connect(sttHostStr.c_str(), port)) {
         Serial.println("[VOICE] Connection to STT proxy failed");
         return "";
     }
@@ -214,7 +213,7 @@ String VoiceInput::sendToSTT(const int16_t* data, size_t sampleCount) {
                   "Content-Type: multipart/form-data; boundary=%s\r\n"
                   "Content-Length: %u\r\n"
                   "Connection: close\r\n\r\n",
-                  STT_PROXY_HOST, STT_PROXY_PORT, boundary, totalSize);
+                  sttHostStr.c_str(), sttPortStr.c_str(), boundary, totalSize);
     client.print(partHeader);
     client.write(wavHeader, 44);
 

@@ -9,7 +9,8 @@ public:
     using DoneCallback = std::function<void()>;
     using ErrorCallback = std::function<void(const String& error)>;
 
-    void begin(const String& apiKey);
+    void begin(const String& apiKey, const String& gwHost,
+               const String& gwPort, const String& gwToken);
 
     // Send message to OpenClaw gateway with SSE streaming.
     // Calls onToken for each text token, onDone when complete, onError on failure.
@@ -25,6 +26,9 @@ public:
 
 private:
     String apiKey;
+    String gwHost;
+    String gwPort;
+    String gwToken;
     bool busy = false;
 
     // Conversation history (keep last N exchanges for context)

@@ -4,7 +4,7 @@
 
 class VoiceInput {
 public:
-    void begin();
+    void begin(const String& sttHost, const String& sttPort);
 
     // Push-to-talk: call when Fn pressed/released
     void startRecording();
@@ -24,6 +24,9 @@ public:
     void drawTranscribingBar(M5Canvas& canvas);
 
 private:
+    String sttHostStr;
+    String sttPortStr;
+
     int16_t* recordBuffer = nullptr;
     size_t maxSamples = 0;
     size_t samplesRecorded = 0;
