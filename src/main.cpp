@@ -82,6 +82,7 @@ void enterChatMode();
 void setup() {
     auto cfg = M5.config();
     M5Cardputer.begin(cfg, true);
+    M5Cardputer.Speaker.setVolume(255);
     Serial.begin(115200);
     delay(500);
     Serial.println("[BOOT] Starting...");
