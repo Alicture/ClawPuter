@@ -15,6 +15,7 @@ class PetBehavior {
     var state: PetState = .idle
     var currentFrame: Int = 0
     var facingLeft: Bool = false
+    var weatherType: Int = -1  // matches WeatherType enum: 0=CLEAR..7=THUNDER, -1=unknown
 
     // Position (top-left of the pet window in screen coordinates)
     var posX: CGFloat = 400
@@ -120,7 +121,8 @@ class PetBehavior {
 
     /// Apply state from ESP32 UDP broadcast
     func applySync(state espState: Int, frame: Int,
-                   normX: Float? = nil, normY: Float? = nil, direction: Int? = nil) {
+                   normX: Float? = nil, normY: Float? = nil, direction: Int? = nil,
+                   weatherType: Int? = nil) {
         lastSyncTime = ProcessInfo.processInfo.systemUptime
         syncMode = true
 
@@ -157,6 +159,11 @@ class PetBehavior {
         // Sync facing direction
         if let d = direction {
             facingLeft = (d != 0)
+        }
+
+        // Sync weather type
+        if let w = weatherType {
+            self.weatherType = w
         }
 
         syncDirty = true

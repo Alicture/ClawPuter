@@ -52,10 +52,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Start UDP listener for Cardputer state sync
         udpListener = UDPListener()
-        udpListener.onStateReceived = { [weak self] state, frame, mode, normX, normY, direction in
+        udpListener.onStateReceived = { [weak self] state, frame, mode, normX, normY, direction, weatherType in
             // Already on main queue (UDPListener dispatches to main)
             self?.behavior.applySync(state: state, frame: frame,
-                                     normX: normX, normY: normY, direction: direction)
+                                     normX: normX, normY: normY, direction: direction,
+                                     weatherType: weatherType)
         }
         udpListener.start()
 
@@ -77,7 +78,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         petWindow.setFrameOrigin(NSPoint(x: behavior.posX, y: behavior.posY))
 
         if needsRedraw {
-            petView.updateSprite(behavior.currentSprite(), facingLeft: behavior.facingLeft, state: behavior.state)
+            petView.updateSprite(behavior.currentSprite(), facingLeft: behavior.facingLeft,
+                                 state: behavior.state, weatherType: behavior.weatherType)
         }
     }
 

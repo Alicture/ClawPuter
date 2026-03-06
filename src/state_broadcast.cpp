@@ -17,13 +17,14 @@ void stateBroadcastBegin(const char* target) {
 }
 
 void stateBroadcastTick(int state, int frame, const char* mode,
-                        float normX, float normY, int direction) {
+                        float normX, float normY, int direction,
+                        int weatherType) {
     if (!broadcastTimer.tick()) return;
 
-    char buf[96];
+    char buf[112];
     int len = snprintf(buf, sizeof(buf),
-        "{\"s\":%d,\"f\":%d,\"m\":\"%s\",\"x\":%.2f,\"y\":%.2f,\"d\":%d}",
-        state, frame, mode, normX, normY, direction);
+        "{\"s\":%d,\"f\":%d,\"m\":\"%s\",\"x\":%.2f,\"y\":%.2f,\"d\":%d,\"w\":%d}",
+        state, frame, mode, normX, normY, direction, weatherType);
 
     // Broadcast (works on normal routers)
     udp.beginPacket("255.255.255.255", BROADCAST_PORT);

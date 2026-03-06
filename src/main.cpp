@@ -9,6 +9,7 @@
 #include "state_broadcast.h"
 #include "voice_input.h"
 #include "tts_playback.h"
+#include "weather_client.h"
 
 // ── Build-time defaults (may be empty if not set in .env) ──
 #ifndef WIFI_SSID
@@ -44,6 +45,9 @@
 #ifndef OPENCLAW_HOST2
 #define OPENCLAW_HOST2 ""
 #endif
+#ifndef DEFAULT_CITY
+#define DEFAULT_CITY "Beijing"
+#endif
 
 // ── Globals ──
 M5Canvas canvas(&M5Cardputer.Display);
@@ -52,6 +56,7 @@ Chat chat;
 AIClient aiClient;
 VoiceInput voiceInput;
 TTSPlayback ttsPlayback;
+WeatherClient weatherClient;
 
 enum class AppMode { SETUP, COMPANION, CHAT };
 static AppMode appMode = AppMode::SETUP;
@@ -133,6 +138,12 @@ void fillBuildTimeDefaults() {
         Config::setPassword2(WIFI_PASS2);
     if (Config::getGatewayHost2().length() == 0 && strlen(OPENCLAW_HOST2) > 0)
         Config::setGatewayHost2(OPENCLAW_HOST2);
+    if (Config::getCity().length() == 0) {
+        if (strlen(DEFAULT_CITY) > 0)
+            Config::setCity(DEFAULT_CITY);
+        else
+            Config::setCity("Beijing"); // fallback when env var not set
+    }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -169,6 +180,11 @@ void loop() {
                     enterChatMode();
                     break;
                 }
+                // Fn+W = toggle weather simulation mode
+                if (ks.fn && ks.word.size() > 0 && ks.word[0] == 'w') {
+                    companion.toggleWeatherSim();
+                    break;
+                }
                 // Fn+R = reset config
                 if (ks.fn && ks.word.size() > 0 && ks.word[0] == 'r') {
                     WiFi.disconnect(true);
@@ -177,6 +193,14 @@ void loop() {
                     Config::save();
                     enterSetupMode();
                     break;
+                }
+                // Digit keys 1-8 in weather sim mode
+                if (companion.isWeatherSimMode() && ks.word.size() > 0) {
+                    char ch = ks.word[0];
+                    if (ch >= '1' && ch <= '8') {
+                        companion.setSimWeatherType(ch - '0');
+                        break;
+                    }
                 }
                 // Non-movement keys → companion handles (space/enter for happy, etc.)
                 char key = 0;
@@ -201,6 +225,10 @@ void loop() {
                 }
             }
 
+            if (!offlineMode) weatherClient.update();
+            if (!companion.isWeatherSimMode()) {
+                companion.setWeather(weatherClient.getData());
+            }
             companion.update(canvas);
             canvas.pushSprite(0, 0);
             break;
@@ -379,10 +407,11 @@ void loop() {
     if (!offlineMode && appMode != AppMode::SETUP) {
         const char* modeStr = "COMPANION";
         if (appMode == AppMode::CHAT) modeStr = "CHAT";
+        int wType = companion.hasValidWeather() ? static_cast<int>(companion.getWeatherType()) : -1;
         stateBroadcastTick(static_cast<int>(companion.getState()),
                            companion.getFrameIndex(), modeStr,
                            companion.getNormX(), companion.getNormY(),
-                           companion.isFacingLeft() ? 1 : 0);
+                           companion.isFacingLeft() ? 1 : 0, wType);
     }
 
     delay(16); // ~60fps cap
@@ -741,7 +770,12 @@ void initOnlineServices(bool usedSecondary) {
     // Init AI client
     aiClient.begin(Config::getApiKey(), gwHost, gwPort, gwToken);
 
-    // Init voice input
+    // Init weather BEFORE voice buffer — TLS needs heap headroom for handshake.
+    // Uses setBufferSizes(1024,512) to minimize TLS heap fragmentation so that
+    // the 160KB voice buffer can still find a contiguous block afterward.
+    weatherClient.begin(Config::getCity());
+
+    // Init voice input — allocates 160KB contiguous buffer
     voiceInput.begin(sttHost, sttPort);
 
     // Init TTS playback — reuses voice input's buffer (mic & speaker share GPIO 43)

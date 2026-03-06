@@ -21,6 +21,23 @@ bool VoiceInput::allocBuffer() {
         recordBuffer = (int16_t*)heap_caps_malloc(bytes, MALLOC_CAP_8BIT);
     }
 
+    // Fallback: if full buffer doesn't fit (e.g. heap fragmented by TLS),
+    // try smaller size that fits the largest free block
+    if (!recordBuffer) {
+        size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+        if (largest > 8192) {
+            size_t fallbackBytes = (largest - 4096) & ~1; // leave some margin, align to 2
+            maxSamples = fallbackBytes / sizeof(int16_t);
+            recordBuffer = (int16_t*)heap_caps_malloc(fallbackBytes, MALLOC_CAP_8BIT);
+            if (recordBuffer) {
+                float secs = (float)maxSamples / SAMPLE_RATE;
+                Serial.printf("[VOICE] Buffer fallback: %zu bytes (%.1fs rec, %.1fs TTS), heap=%u\n",
+                              fallbackBytes, secs, secs * 2.0f, ESP.getFreeHeap());
+                return true;
+            }
+        }
+    }
+
     if (recordBuffer) {
         Serial.printf("[VOICE] Buffer allocated: %zu bytes, heap=%u\n", bytes, ESP.getFreeHeap());
         return true;

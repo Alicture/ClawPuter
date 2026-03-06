@@ -23,6 +23,7 @@ namespace Config {
     const String& getSSID2();
     const String& getPassword2();
     const String& getGatewayHost2();
+    const String& getCity();
 
     // Setters
     void setSSID(const String& ssid);
@@ -36,6 +37,7 @@ namespace Config {
     void setSSID2(const String& ssid);
     void setPassword2(const String& password);
     void setGatewayHost2(const String& host);
+    void setCity(const String& city);
 
     // Check if config is valid (has WiFi credentials)
     bool isValid();

@@ -1,6 +1,7 @@
 #pragma once
 #include <M5Cardputer.h>
 #include "utils.h"
+#include "weather_client.h"
 
 enum class CompanionState {
     IDLE,
@@ -9,6 +10,10 @@ enum class CompanionState {
     TALK,
     STRETCH,   // spontaneous stretch
     LOOK       // spontaneous look around
+};
+
+enum class AccessoryType : uint8_t {
+    NONE, SUNGLASSES, UMBRELLA, SNOW_HAT, MASK
 };
 
 class Companion {
@@ -24,7 +29,16 @@ public:
     void triggerTalk();
     void triggerIdle();
 
+    void setWeather(const WeatherData& wd) { weather = wd; }
+
+    // Weather simulation mode
+    void toggleWeatherSim();
+    void setSimWeatherType(int index); // 1-8
+    bool isWeatherSimMode() const { return weatherSimMode; }
+
     CompanionState getState() const { return state; }
+    WeatherType getWeatherType() const { return weather.type; }
+    bool hasValidWeather() const { return weather.valid; }
     int getFrameIndex() const { return frameIndex; }
     float getNormX() const;
     float getNormY() const;
@@ -58,15 +72,38 @@ private:
     int displayHour();  // time-travel: hour adjusted by pet X position
 
     void drawBackground(M5Canvas& canvas);
+    void drawWeatherEffects(M5Canvas& canvas);
     void drawCharacter(M5Canvas& canvas);
     void drawClock(M5Canvas& canvas);
     void drawSleepZ(M5Canvas& canvas);
     void drawStatusText(M5Canvas& canvas);
     void drawDayElements(M5Canvas& canvas);
+    void drawAccessory(M5Canvas& canvas, int charDrawX, int charDrawY);
+    void drawSimStatusBar(M5Canvas& canvas);
+    static AccessoryType getAccessoryForWeather(WeatherType type);
 
     void setState(CompanionState newState);
     void initStars();
     void trySpontaneousAction();
+
+    // Weather simulation
+    bool weatherSimMode = false;
+    int simWeatherIndex = 0;  // 0-7 for 8 weather types
+    WeatherData simWeatherData;
+
+    // Weather state
+    WeatherData weather;
+    struct RainDrop { int16_t x, y; };
+    static constexpr int MAX_RAIN = 15;
+    RainDrop rainDrops[MAX_RAIN];
+    struct Snowflake { int16_t x, y; int8_t drift; };
+    static constexpr int MAX_SNOW = 15;
+    Snowflake snowflakes[MAX_SNOW];
+    bool weatherParticlesInit = false;
+    unsigned long lastThunderFlash = 0;
+    bool thunderFlashing = false;
+
+    void initWeatherParticles();
 
     // Draw a sprite with transparency (flip=true for horizontal mirror)
     void drawSprite16(M5Canvas& canvas, int x, int y, const uint16_t* data, bool flip = false);

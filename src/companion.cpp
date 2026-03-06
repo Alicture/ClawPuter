@@ -162,6 +162,7 @@ void Companion::update(M5Canvas& canvas) {
     drawCharacter(canvas);
     drawSleepZ(canvas);
     drawClock(canvas);
+    drawSimStatusBar(canvas);
     drawStatusText(canvas);
 }
 
@@ -196,6 +197,64 @@ void Companion::triggerIdle() {
     setState(CompanionState::IDLE);
     idleTimeout.reset();
     playNotification();
+}
+
+// ── Weather Simulation Mode ──
+
+static const WeatherType SIM_WEATHER_TYPES[] = {
+    WeatherType::CLEAR, WeatherType::PARTLY_CLOUDY, WeatherType::OVERCAST,
+    WeatherType::FOG, WeatherType::DRIZZLE, WeatherType::RAIN,
+    WeatherType::SNOW, WeatherType::THUNDER
+};
+
+static const char* SIM_WEATHER_NAMES[] = {
+    "Clear", "Cloudy", "Overcast", "Fog",
+    "Drizzle", "Rain", "Snow", "Thunder"
+};
+
+static_assert(sizeof(SIM_WEATHER_TYPES)/sizeof(SIM_WEATHER_TYPES[0]) ==
+              sizeof(SIM_WEATHER_NAMES)/sizeof(SIM_WEATHER_NAMES[0]),
+              "SIM_WEATHER_TYPES and SIM_WEATHER_NAMES must have same count");
+
+void Companion::toggleWeatherSim() {
+    weatherSimMode = !weatherSimMode;
+    if (weatherSimMode) {
+        simWeatherIndex = 0;
+        simWeatherData.temperature = 25.0f;
+        simWeatherData.type = WeatherType::CLEAR;
+        simWeatherData.isDay = true;
+        simWeatherData.valid = true;
+        setWeather(simWeatherData);
+    }
+    weatherParticlesInit = false; // re-init particles on both enter and exit
+}
+
+void Companion::setSimWeatherType(int index) {
+    if (index < 1 || index > 8) return;
+    simWeatherIndex = index - 1;
+    simWeatherData.type = SIM_WEATHER_TYPES[simWeatherIndex];
+    simWeatherData.valid = true;
+    setWeather(simWeatherData);
+    weatherParticlesInit = false; // re-init particles for new weather
+}
+
+AccessoryType Companion::getAccessoryForWeather(WeatherType type) {
+    switch (type) {
+        case WeatherType::CLEAR:
+        case WeatherType::PARTLY_CLOUDY:
+            return AccessoryType::SUNGLASSES;
+        case WeatherType::RAIN:
+        case WeatherType::DRIZZLE:
+        case WeatherType::THUNDER:
+            return AccessoryType::UMBRELLA;
+        case WeatherType::SNOW:
+            return AccessoryType::SNOW_HAT;
+        case WeatherType::FOG:
+        case WeatherType::OVERCAST:
+            return AccessoryType::MASK;
+        default:
+            return AccessoryType::NONE;
+    }
 }
 
 void Companion::move(int dx, int dy) {
@@ -253,40 +312,88 @@ void Companion::playHappy() {
 
 // ── Drawing ──
 
+// Blend two RGB565 colors: result = a * (1-t) + b * t, t in [0..255]
+static uint16_t blendRGB565(uint16_t a, uint16_t b, uint8_t t) {
+    uint8_t r1 = (a >> 11) & 0x1F, g1 = (a >> 5) & 0x3F, b1 = a & 0x1F;
+    uint8_t r2 = (b >> 11) & 0x1F, g2 = (b >> 5) & 0x3F, b2 = b & 0x1F;
+    uint8_t r = r1 + ((int)(r2 - r1) * t / 255);
+    uint8_t g = g1 + ((int)(g2 - g1) * t / 255);
+    uint8_t bl = b1 + ((int)(b2 - b1) * t / 255);
+    return (r << 11) | (g << 5) | bl;
+}
+
 void Companion::drawBackground(M5Canvas& canvas) {
     int h = displayHour();
     uint16_t skyColor, groundColor, groundTopColor;
 
     if (h >= 6 && h < 17) {
-        // Daytime
         skyColor = SKY_DAY;
         groundColor = GROUND_DAY;
         groundTopColor = GROUND_DAY_TOP;
     } else if (h >= 17 && h < 19) {
-        // Sunset
         skyColor = SKY_SUNSET;
         groundColor = Color::GROUND;
         groundTopColor = Color::GROUND_TOP;
     } else {
-        // Night
         skyColor = SKY_NIGHT;
         groundColor = Color::GROUND;
         groundTopColor = Color::GROUND_TOP;
     }
 
-    canvas.fillScreen(skyColor);
-
-    // Day elements
-    if (h >= 6 && h < 17) {
-        drawDayElements(canvas);
-    } else if (h >= 17 && h < 19) {
-        // Sunset sun (low position)
-        canvas.fillCircle(200, GROUND_Y - 10, 12, SUN_COLOR);
-        canvas.fillCircle(200, GROUND_Y - 10, 10, rgb565(255, 160, 40));
+    // Weather sky tinting
+    bool hideSun = false;
+    if (weather.valid) {
+        switch (weather.type) {
+            case WeatherType::OVERCAST:
+                skyColor = blendRGB565(skyColor, rgb565(100, 100, 110), 160);
+                hideSun = true;
+                break;
+            case WeatherType::RAIN:
+            case WeatherType::THUNDER:
+                skyColor = blendRGB565(skyColor, rgb565(60, 60, 75), 180);
+                hideSun = true;
+                break;
+            case WeatherType::DRIZZLE:
+                skyColor = blendRGB565(skyColor, rgb565(90, 90, 105), 140);
+                hideSun = true;
+                break;
+            case WeatherType::SNOW:
+                skyColor = blendRGB565(skyColor, rgb565(120, 120, 135), 150);
+                hideSun = true;
+                break;
+            case WeatherType::FOG:
+                skyColor = blendRGB565(skyColor, rgb565(140, 140, 145), 170);
+                hideSun = true;
+                break;
+            default:
+                break;
+        }
     }
 
-    // Night: stars + moon
-    if (h >= 19 || h < 6) {
+    canvas.fillScreen(skyColor);
+
+    // Day elements (hide sun during heavy weather)
+    if (h >= 6 && h < 17) {
+        if (!hideSun) {
+            drawDayElements(canvas);
+        } else {
+            // Still draw clouds (darker) but no sun
+            uint16_t darkCloud = rgb565(150, 150, 160);
+            canvas.fillRoundRect(30, 10, 30, 10, 5, darkCloud);
+            canvas.fillRoundRect(40, 5, 20, 10, 5, darkCloud);
+            canvas.fillRoundRect(120, 15, 28, 9, 4, darkCloud);
+            canvas.fillRoundRect(128, 9, 18, 9, 4, darkCloud);
+            canvas.fillRoundRect(180, 12, 26, 8, 4, darkCloud);
+        }
+    } else if (h >= 17 && h < 19) {
+        if (!hideSun) {
+            canvas.fillCircle(200, GROUND_Y - 10, 12, SUN_COLOR);
+            canvas.fillCircle(200, GROUND_Y - 10, 10, rgb565(255, 160, 40));
+        }
+    }
+
+    // Night: stars + moon (hide in heavy weather)
+    if ((h >= 19 || h < 6) && !hideSun) {
         for (int i = 0; i < MAX_STARS; i++) {
             if (stars[i].visible) {
                 canvas.drawPixel(stars[i].x, stars[i].y, Color::STAR);
@@ -298,10 +405,12 @@ void Companion::drawBackground(M5Canvas& canvas) {
                 }
             }
         }
-        // Crescent moon
         canvas.fillCircle(30, 20, 10, MOON_COLOR);
-        canvas.fillCircle(34, 17, 9, skyColor);  // cut out crescent
+        canvas.fillCircle(34, 17, 9, skyColor);
     }
+
+    // Weather particle effects (rain, snow, fog, thunder flash)
+    drawWeatherEffects(canvas);
 
     // Ground
     canvas.fillRect(0, GROUND_Y, SCREEN_W, SCREEN_H - GROUND_Y, groundColor);
@@ -311,6 +420,119 @@ void Companion::drawBackground(M5Canvas& canvas) {
         int gx = (i * 31 + 10) % SCREEN_W;
         canvas.drawPixel(gx, GROUND_Y + 4, groundTopColor);
         canvas.drawPixel(gx + 15, GROUND_Y + 8, groundTopColor);
+    }
+}
+
+void Companion::initWeatherParticles() {
+    for (int i = 0; i < MAX_RAIN; i++) {
+        rainDrops[i].x = random(SCREEN_W);
+        rainDrops[i].y = random(GROUND_Y);
+    }
+    for (int i = 0; i < MAX_SNOW; i++) {
+        snowflakes[i].x = random(SCREEN_W);
+        snowflakes[i].y = random(GROUND_Y);
+        snowflakes[i].drift = random(3) - 1; // -1, 0, or 1
+    }
+    weatherParticlesInit = true;
+}
+
+void Companion::drawWeatherEffects(M5Canvas& canvas) {
+    if (!weather.valid) return;
+    if (!weatherParticlesInit) initWeatherParticles();
+
+    switch (weather.type) {
+        case WeatherType::RAIN:
+        case WeatherType::DRIZZLE:
+        case WeatherType::THUNDER: {
+            // Rain drops — vertical lines falling down
+            int count = (weather.type == WeatherType::DRIZZLE) ? 8 : MAX_RAIN;
+            int speed = (weather.type == WeatherType::DRIZZLE) ? 3 : 5;
+            int len = (weather.type == WeatherType::DRIZZLE) ? 3 : 5;
+            uint16_t rainColor = rgb565(140, 160, 200);
+
+            for (int i = 0; i < count; i++) {
+                rainDrops[i].y += speed;
+                if (rainDrops[i].y >= GROUND_Y) {
+                    rainDrops[i].y = random(-10, 0);
+                    rainDrops[i].x = random(SCREEN_W);
+                }
+                if (rainDrops[i].y >= 0) {
+                    int endY = rainDrops[i].y + len;
+                    if (endY > GROUND_Y) endY = GROUND_Y;
+                    canvas.drawFastVLine(rainDrops[i].x, rainDrops[i].y, endY - rainDrops[i].y, rainColor);
+                }
+            }
+
+            // Thunder: flash every 3-5 seconds
+            if (weather.type == WeatherType::THUNDER) {
+                unsigned long now = millis();
+                if (!thunderFlashing && now - lastThunderFlash > 3000 + random(2000)) {
+                    thunderFlashing = true;
+                    lastThunderFlash = now;
+                }
+                if (thunderFlashing) {
+                    // Flash white for ~50ms (3 frames at 60fps)
+                    if (now - lastThunderFlash < 50) {
+                        canvas.fillScreen(rgb565(200, 200, 220));
+                        // Redraw rain on top of flash
+                        for (int i = 0; i < count; i++) {
+                            if (rainDrops[i].y >= 0) {
+                                int endY = rainDrops[i].y + len;
+                                if (endY > GROUND_Y) endY = GROUND_Y;
+                                canvas.drawFastVLine(rainDrops[i].x, rainDrops[i].y, endY - rainDrops[i].y, rainColor);
+                            }
+                        }
+                    } else {
+                        thunderFlashing = false;
+                    }
+                }
+            }
+            break;
+        }
+
+        case WeatherType::SNOW: {
+            uint16_t snowColor = rgb565(220, 220, 230);
+            for (int i = 0; i < MAX_SNOW; i++) {
+                snowflakes[i].y += 1;  // Slow fall
+                snowflakes[i].x += snowflakes[i].drift;
+                // Re-randomize drift occasionally
+                if (random(20) == 0) snowflakes[i].drift = random(3) - 1;
+
+                if (snowflakes[i].y >= GROUND_Y) {
+                    snowflakes[i].y = random(-5, 0);
+                    snowflakes[i].x = random(SCREEN_W);
+                }
+                // Wrap X
+                if (snowflakes[i].x < 0) snowflakes[i].x = SCREEN_W - 1;
+                if (snowflakes[i].x >= SCREEN_W) snowflakes[i].x = 0;
+
+                if (snowflakes[i].y >= 0) {
+                    canvas.drawPixel(snowflakes[i].x, snowflakes[i].y, snowColor);
+                    // Larger flakes for every 3rd
+                    if (i % 3 == 0) {
+                        canvas.drawPixel(snowflakes[i].x + 1, snowflakes[i].y, snowColor);
+                        canvas.drawPixel(snowflakes[i].x, snowflakes[i].y + 1, snowColor);
+                    }
+                }
+            }
+            break;
+        }
+
+        case WeatherType::FOG: {
+            // Semi-transparent fog: scatter gray dots across sky
+            uint16_t fogColor = rgb565(160, 160, 165);
+            // Deterministic pattern based on frame for slight shimmer
+            int offset = (millis() / 200) % 3;
+            for (int y = 20 + offset; y < GROUND_Y; y += 4) {
+                for (int x = (y % 6); x < SCREEN_W; x += 6) {
+                    canvas.drawPixel(x, y, fogColor);
+                }
+            }
+            break;
+        }
+
+        default:
+            break;
     }
 }
 
@@ -373,6 +595,7 @@ void Companion::drawCharacter(M5Canvas& canvas) {
         }
 
         drawSprite16(canvas, charX + xOffset, charY + yOffset, frame, facingLeft);
+        drawAccessory(canvas, charX + xOffset, charY + yOffset);
     }
 }
 
@@ -403,8 +626,44 @@ void Companion::drawClock(M5Canvas& canvas) {
 
     canvas.setTextColor(Color::CLOCK_TEXT);
     canvas.setTextSize(2);
+
+    // Layout: center "HH:MM  0°" as a whole if weather valid
+    char tempStr[8] = {};
+    int tempW = 0;
+    if (weather.valid) {
+        int tempInt = (int)roundf(weather.temperature);
+        if (tempInt < -99) tempInt = -99;
+        if (tempInt > 99) tempInt = 99;
+        snprintf(tempStr, sizeof(tempStr), "%d~", tempInt); // ~ as degree placeholder
+        tempW = canvas.textWidth(tempStr);
+    }
+
     int tw = canvas.textWidth(timeStr);
-    canvas.drawString(timeStr, (SCREEN_W - tw) / 2, GROUND_Y + 6);
+    int sep = weather.valid ? 10 : 0; // space before separator
+    int sepW = weather.valid ? 1 : 0; // separator line width
+    int sep2 = weather.valid ? 10 : 0; // space after separator
+    int totalW = tw + sep + sepW + sep2 + tempW;
+    int startX = (SCREEN_W - totalW) / 2;
+
+    canvas.drawString(timeStr, startX, GROUND_Y + 6);
+
+    if (weather.valid) {
+        // Draw separator line
+        int sepX = startX + tw + sep;
+        canvas.drawFastVLine(sepX, GROUND_Y + 8, 12, Color::STATUS_DIM);
+
+        // Draw temperature number
+        char numStr[8];
+        int tempInt = (int)roundf(weather.temperature);
+        if (tempInt < -99) tempInt = -99;
+        if (tempInt > 99) tempInt = 99;
+        snprintf(numStr, sizeof(numStr), "%d", tempInt);
+        int tempX = sepX + sepW + sep2;
+        canvas.drawString(numStr, tempX, GROUND_Y + 6);
+        // Draw small ° circle instead of font glyph
+        int numW = canvas.textWidth(numStr);
+        canvas.drawCircle(tempX + numW + 3, GROUND_Y + 8, 2, Color::CLOCK_TEXT);
+    }
 }
 
 void Companion::drawSleepZ(M5Canvas& canvas) {
@@ -444,6 +703,80 @@ void Companion::drawStatusText(M5Canvas& canvas) {
     canvas.setTextSize(1);
     canvas.drawString(statusStr, 4, 4);
     canvas.drawString("[TAB] chat", SCREEN_W - 60, 4);
+}
+
+// ── Accessories ──
+
+void Companion::drawAccessory(M5Canvas& canvas, int x, int y) {
+    if (!weather.valid) return;
+    AccessoryType acc = getAccessoryForWeather(weather.type);
+    if (acc == AccessoryType::NONE) return;
+
+    bool flip = facingLeft;
+
+    switch (acc) {
+        case AccessoryType::SUNGLASSES: {
+            uint16_t glassColor = rgb565(20, 20, 40);
+            if (!flip) {
+                canvas.fillRect(x + 12, y + 15, 9, 3, glassColor);  // left lens
+                canvas.fillRect(x + 27, y + 15, 9, 3, glassColor);  // right lens
+                canvas.drawFastHLine(x + 21, y + 16, 6, glassColor); // bridge
+            } else {
+                canvas.fillRect(x + CHAR_DRAW_W - 21, y + 15, 9, 3, glassColor);
+                canvas.fillRect(x + CHAR_DRAW_W - 36, y + 15, 9, 3, glassColor);
+                canvas.drawFastHLine(x + CHAR_DRAW_W - 27, y + 16, 6, glassColor);
+            }
+            break;
+        }
+        case AccessoryType::UMBRELLA: {
+            uint16_t umbColor = rgb565(60, 60, 200);
+            uint16_t handleColor = rgb565(120, 80, 40);
+            // Umbrella canopy above head
+            canvas.fillRoundRect(x + 6, y - 10, 36, 8, 4, umbColor);
+            // Handle
+            canvas.drawFastVLine(x + 24, y - 2, 8, handleColor);
+            break;
+        }
+        case AccessoryType::SNOW_HAT: {
+            uint16_t hatColor = rgb565(200, 60, 60);
+            canvas.fillRoundRect(x + 9, y + 3, 30, 6, 3, hatColor);
+            // Pompom
+            canvas.fillCircle(x + 24, y + 2, 3, 0xFFFF); // white
+            break;
+        }
+        case AccessoryType::MASK: {
+            uint16_t maskColor = rgb565(180, 200, 180);
+            uint16_t strapColor = rgb565(120, 120, 120);
+            if (!flip) {
+                canvas.fillRect(x + 12, y + 21, 24, 6, maskColor);
+                canvas.drawFastHLine(x + 9, y + 23, 3, strapColor);
+                canvas.drawFastHLine(x + 36, y + 23, 3, strapColor);
+            } else {
+                canvas.fillRect(x + CHAR_DRAW_W - 36, y + 21, 24, 6, maskColor);
+                canvas.drawFastHLine(x + CHAR_DRAW_W - 12, y + 23, 3, strapColor);
+                canvas.drawFastHLine(x + CHAR_DRAW_W - 39, y + 23, 3, strapColor);
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+void Companion::drawSimStatusBar(M5Canvas& canvas) {
+    if (!weatherSimMode) return;
+
+    // Semi-transparent black bar at bottom
+    int barY = SCREEN_H - 12;
+    canvas.fillRect(0, barY, SCREEN_W, 12, rgb565(20, 20, 20));
+
+    canvas.setTextColor(Color::WHITE);
+    canvas.setTextSize(1);
+
+    char label[32];
+    snprintf(label, sizeof(label), "[SIM] %s (%d)", SIM_WEATHER_NAMES[simWeatherIndex], simWeatherIndex + 1);
+    int tw = canvas.textWidth(label);
+    canvas.drawString(label, (SCREEN_W - tw) / 2, barY + 2);
 }
 
 // ══════════════════════════════════════════════════════════════
