@@ -51,6 +51,9 @@ class PetBehavior {
     private var happyTimer: TimeInterval = 0
     private let happyDuration: TimeInterval = 2.0
 
+    // ── Perch mode (sit on a window) ──
+    var perchTarget: NSPoint?  // Set to position the pet on a window; nil = normal follow
+
     // ── Sync mode ──
     private(set) var syncMode: Bool = false
     private var lastSyncTime: TimeInterval = 0
@@ -213,6 +216,12 @@ class PetBehavior {
             case .sleep, .talk, .stretch, .look:
                 break
             }
+        }
+
+        // Perch mode overrides target
+        if let perch = perchTarget {
+            targetX = perch.x
+            targetY = perch.y
         }
 
         // Smooth position lerp (always active, even in sync mode)

@@ -19,6 +19,9 @@ public:
                      DoneCallback onDone,
                      ErrorCallback onError);
 
+    // Set pixel art mode for next request (uses specialized prompt, higher limit)
+    void setPixelArtMode(bool enabled, int size = 8);
+
     // Call in loop() to process streaming response
     void update();
 
@@ -47,4 +50,8 @@ private:
     void addToHistory(const String& user, const String& assistant);
     // Build JSON request body into doc. Caller uses measureJson/serializeJson.
     void buildRequestDoc(const String& userMessage, JsonDocument& doc);
+
+    // Pixel art mode
+    bool pixelArtMode = false;
+    int pixelArtSize = 8;
 };

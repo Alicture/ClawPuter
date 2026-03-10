@@ -6,8 +6,17 @@ class UDPListener {
     private var listenThread: Thread?
     private var running = false
 
+    /// The ESP32's IP address, extracted from UDP source — used by TCPSender
+    private(set) var esp32Address: String?
+
     /// Callback: (state, frameIndex, appMode, normX, normY, direction, weatherType, temperature) — called on main queue
     var onStateReceived: ((Int, Int, String, Float?, Float?, Int?, Int?, Float?) -> Void)?
+
+    /// Callback: pixel art data received — (size, rows) — called on main queue
+    var onPixelArtReceived: ((Int, [String]) -> Void)?
+
+    /// Callback: chat message received — (role, text) — called on main queue
+    var onChatMessageReceived: ((String, String) -> Void)?
 
     func start() {
         // Create UDP socket
@@ -37,7 +46,7 @@ class UDPListener {
 
         guard bindResult == 0 else {
             print("[UDP] Failed to bind: \(String(cString: strerror(errno)))")
-            close(socketFD)
+            Darwin.close(socketFD)
             socketFD = -1
             return
         }
@@ -56,21 +65,44 @@ class UDPListener {
     func stop() {
         running = false
         if socketFD >= 0 {
-            close(socketFD)
+            Darwin.close(socketFD)
             socketFD = -1
         }
     }
 
     private func receiveLoop() {
-        var buf = [UInt8](repeating: 0, count: 256)
+        var buf = [UInt8](repeating: 0, count: 1024)  // Larger buffer for pixel art packets
+        var srcAddr = sockaddr_in()
+        var srcAddrLen = socklen_t(MemoryLayout<sockaddr_in>.size)
 
         while running && socketFD >= 0 {
-            let n = recv(socketFD, &buf, buf.count, 0)
-            if n > 0 {
-                let data = Data(buf[0..<n])
-                if let str = String(data: data, encoding: .utf8) {
-                    print("[UDP] Received: \(str)")
+            let n = withUnsafeMutablePointer(to: &srcAddr) { addrPtr in
+                addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
+                    recvfrom(socketFD, &buf, buf.count, 0, sockPtr, &srcAddrLen)
                 }
+            }
+
+            if n > 0 {
+                // Extract source IP
+                let ipBytes = srcAddr.sin_addr.s_addr
+                let ip = String(format: "%d.%d.%d.%d",
+                                ipBytes & 0xFF,
+                                (ipBytes >> 8) & 0xFF,
+                                (ipBytes >> 16) & 0xFF,
+                                (ipBytes >> 24) & 0xFF)
+
+                // Update ESP32 address on main queue for thread safety (skip localhost / broadcast)
+                if ip != "127.0.0.1" && ip != "255.255.255.255" {
+                    let newIP = ip
+                    DispatchQueue.main.async { [weak self] in
+                        if self?.esp32Address != newIP {
+                            self?.esp32Address = newIP
+                            print("[UDP] ESP32 address: \(newIP)")
+                        }
+                    }
+                }
+
+                let data = Data(buf[0..<n])
                 parsePacket(data)
             } else if n < 0 && errno != EAGAIN {
                 print("[UDP] recv error: \(String(cString: strerror(errno)))")
@@ -81,9 +113,38 @@ class UDPListener {
     }
 
     private func parsePacket(_ data: Data) {
-        // Expect compact JSON: {"s":0,"f":1,"m":"COMPANION"}
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let state = json["s"] as? Int,
+        // Expect compact JSON
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        // Check for "type" field — new message types
+        if let type = json["type"] as? String {
+            switch type {
+            case "pixelart":
+                if let size = json["size"] as? Int,
+                   let rows = json["rows"] as? [String] {
+                    let callback = onPixelArtReceived
+                    DispatchQueue.main.async {
+                        callback?(size, rows)
+                    }
+                }
+            case "chat":
+                if let role = json["role"] as? String,
+                   let text = json["text"] as? String {
+                    let callback = onChatMessageReceived
+                    DispatchQueue.main.async {
+                        callback?(role, text)
+                    }
+                }
+            default:
+                break
+            }
+            return
+        }
+
+        // Legacy state sync packet (no "type" field)
+        guard let state = json["s"] as? Int,
               let frame = json["f"] as? Int,
               let mode = json["m"] as? String else {
             return

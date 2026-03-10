@@ -7,6 +7,7 @@
 #include "chat.h"
 #include "ai_client.h"
 #include "state_broadcast.h"
+#include "cmd_server.h"
 #include "voice_input.h"
 #include "tts_playback.h"
 #include "weather_client.h"
@@ -57,6 +58,7 @@ AIClient aiClient;
 VoiceInput voiceInput;
 TTSPlayback ttsPlayback;
 WeatherClient weatherClient;
+CmdServer cmdServer;
 
 enum class AppMode { SETUP, COMPANION, CHAT };
 static AppMode appMode = AppMode::SETUP;
@@ -230,6 +232,7 @@ void loop() {
                 companion.setWeather(weatherClient.getData());
             }
             companion.update(canvas);
+            companion.drawNotificationOverlay(canvas);
             canvas.pushSprite(0, 0);
             break;
         }
@@ -330,6 +333,14 @@ void loop() {
                     Serial.printf("[CHAT] Sending: %s\n", msg.c_str());
                     companion.triggerTalk();
 
+                    // Broadcast user message to desktop
+                    stateBroadcastChatMsg("user", msg.c_str());
+
+                    // Set pixel art mode if /draw command
+                    bool isDrawCmd = chat.isDrawCommand();
+                    int drawSz = chat.getDrawSize();
+                    aiClient.setPixelArtMode(isDrawCmd, drawSz);
+
                     bool aiError = false;
                     aiClient.sendMessage(msg,
                         // onToken — receives const char* (zero heap allocation)
@@ -360,8 +371,25 @@ void loop() {
                         }
                     );
 
-                    // TTS: speak the AI response (sendMessage is blocking, so we're here after it completes)
+                    // Broadcast AI response to desktop
                     if (!aiError && aiClient.getLastResponse().length() > 0) {
+                        stateBroadcastChatMsg("ai", aiClient.getLastResponse().c_str());
+                    }
+
+                    // Broadcast pixel art to desktop if one was just parsed
+                    if (chat.hasNewPixelArt()) {
+                        char rows[16][17];
+                        int paSize = chat.getLastPixelArtRows(rows, 16);
+                        if (paSize > 0) {
+                            const char* rowPtrs[16];
+                            for (int i = 0; i < paSize; i++) rowPtrs[i] = rows[i];
+                            stateBroadcastPixelArt(paSize, rowPtrs, paSize);
+                        }
+                        chat.clearNewPixelArt();
+                    }
+
+                    // TTS: speak the AI response (skip for pixel art)
+                    if (!aiError && !isDrawCmd && aiClient.getLastResponse().length() > 0) {
                         // Show "Speaking..." indicator while downloading PCM
                         chat.update(canvas);
                         ttsPlayback.drawSpeakingBar(canvas);
@@ -398,9 +426,15 @@ void loop() {
             } else if (ttsPlayback.isPlaying()) {
                 ttsPlayback.drawSpeakingBar(canvas);
             }
+            companion.drawNotificationOverlay(canvas);
             canvas.pushSprite(0, 0);
             break;
         }
+    }
+
+    // Process incoming TCP commands from desktop app
+    if (!offlineMode && appMode != AppMode::SETUP) {
+        cmdServer.tick();
     }
 
     // Broadcast state over UDP for desktop sync (skip if offline or not yet initialized)
@@ -782,6 +816,28 @@ void initOnlineServices(bool usedSecondary) {
     // Init TTS playback — reuses voice input's buffer (mic & speaker share GPIO 43)
     ttsPlayback.begin(sttHost, sttPort,
                       voiceInput.getBuffer(), voiceInput.getMaxSamples());
+
+    // Init TCP command server for desktop bidirectional communication
+    cmdServer.begin();
+    cmdServer.onAnimate([](const char* state) {
+        Serial.printf("[CMD] Animate: %s\n", state);
+        if (strcmp(state, "happy") == 0) companion.triggerHappy();
+        else if (strcmp(state, "idle") == 0) companion.triggerIdle();
+        else if (strcmp(state, "sleep") == 0) companion.triggerSleep();
+        else if (strcmp(state, "talk") == 0) companion.triggerTalk();
+    });
+    cmdServer.onText([](const char* text, bool autoSend) {
+        Serial.printf("[CMD] Text: '%s' autoSend=%d\n", text, autoSend);
+        if (aiClient.isBusy()) return;  // Don't inject while AI is processing
+        chat.setInput(String(text));
+        if (autoSend && appMode == AppMode::CHAT) {
+            chat.handleEnter();
+        }
+    });
+    cmdServer.onNotify([](const char* app, const char* title, const char* body) {
+        Serial.printf("[CMD] Notify: [%s] %s - %s\n", app, title, body);
+        companion.showNotification(app, title, body);
+    });
 }
 
 void enterCompanionMode() {

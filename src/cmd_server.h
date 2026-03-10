@@ -1,0 +1,42 @@
+#pragma once
+#include <Arduino.h>
+#include <functional>
+
+// Command server for receiving commands from Mac desktop app.
+// Listens on TCP 19821 + UDP 19822 (dual-stack for compatibility).
+// Protocol: client sends JSON line + \n, server responds {"ok":true}\n.
+
+class CmdServer {
+public:
+    // Command callbacks
+    using AnimateCallback = std::function<void(const char* state)>;     // "happy","idle","sleep","talk"
+    using TextCallback = std::function<void(const char* text, bool autoSend)>;  // text input (autoSend=true for "say")
+    using NotifyCallback = std::function<void(const char* app, const char* title, const char* body)>;
+    using HistoryCallback = std::function<String()>;  // returns JSON array of chat messages
+
+    void begin();
+    void tick();  // Call from main loop — non-blocking
+
+    // Register callbacks
+    void onAnimate(AnimateCallback cb) { animateCb = cb; }
+    void onText(TextCallback cb) { textCb = cb; }
+    void onNotify(NotifyCallback cb) { notifyCb = cb; }
+    void onHistory(HistoryCallback cb) { historyCb = cb; }
+
+    static constexpr uint16_t CMD_PORT = 19821;      // TCP
+    static constexpr uint16_t CMD_UDP_PORT = 19822;   // UDP
+
+private:
+    static constexpr int BUF_SIZE = 384;
+
+    AnimateCallback animateCb;
+    TextCallback textCb;
+    NotifyCallback notifyCb;
+    HistoryCallback historyCb;
+
+    bool started = false;
+
+    void tickTCP();
+    void tickUDP();
+    void processCommand(const char* json, char* responseBuf, int responseBufSize);
+};

@@ -194,7 +194,7 @@ void AIClient::sendMessage(const String& userMessage,
                 break;
             }
 
-            if (fullResponse.length() > 300) break;
+            if (fullResponse.length() > (unsigned)(pixelArtMode ? 400 : 300)) break;
         }
     } else {
         // Non-chunked: read byte-by-byte into lineBuf (same zero-alloc approach)
@@ -220,7 +220,7 @@ void AIClient::sendMessage(const String& userMessage,
             } else if (lineLen < (int)sizeof(lineBuf) - 1) {
                 lineBuf[lineLen++] = c;
             }
-            if (fullResponse.length() > 300) break;
+            if (fullResponse.length() > (unsigned)(pixelArtMode ? 400 : 300)) break;
         }
     }
 
@@ -231,17 +231,26 @@ void AIClient::sendMessage(const String& userMessage,
         ESP.getMinFreeHeap());
 
     if (fullResponse.length() > 0) {
-        addToHistory(userMessage, fullResponse);
+        // Don't add pixel art responses to conversation history
+        if (!pixelArtMode) {
+            addToHistory(userMessage, fullResponse);
+        }
         lastResponse = fullResponse;
     } else {
         lastResponse = "";
     }
 
     busy = false;
+    pixelArtMode = false;  // Reset after request
     if (onDone) onDone();
 }
 
 void AIClient::update() {
+}
+
+void AIClient::setPixelArtMode(bool enabled, int size) {
+    pixelArtMode = enabled;
+    pixelArtSize = size;
 }
 
 void AIClient::addToHistory(const String& user, const String& assistant) {
@@ -267,22 +276,54 @@ void AIClient::buildRequestDoc(const String& userMessage, JsonDocument& doc) {
 
     JsonObject sysMsg = messages.add<JsonObject>();
     sysMsg["role"] = "system";
-    sysMsg["content"] = "You are a tiny pixel companion living inside a Cardputer device. "
-                        "Keep responses very short (1-2 sentences max) since the screen is tiny (240x135). "
-                        "Be friendly and playful. Use simple words. "
-                        "NEVER use emoji, markdown formatting, or special Unicode characters. Plain text only.";
 
-    for (int i = 0; i < historyCount; i++) {
-        JsonObject userMsg = messages.add<JsonObject>();
-        userMsg["role"] = "user";
-        userMsg["content"] = history[i].user;
+    if (pixelArtMode) {
+        // Pixel art specialized prompt — no history needed
+        char prompt[512];
+        snprintf(prompt, sizeof(prompt),
+            "You are a pixel art generator. Output ONLY a %dx%d pixel art grid. "
+            "Palette: 0=transparent 1=black 2=white 3=red 4=darkred 5=orange "
+            "6=yellow 7=green 8=darkgreen 9=blue a=lightblue b=purple "
+            "c=pink d=brown e=gray f=lightgray. "
+            "Format: [PIXELART:%d] then %d rows of %d hex chars, then [/PIXELART]. "
+            "No other text. No spaces in rows.",
+            pixelArtSize, pixelArtSize, pixelArtSize, pixelArtSize, pixelArtSize);
+        sysMsg["content"] = prompt;
+    } else {
+        sysMsg["content"] = "You are a tiny pixel companion living inside a Cardputer device. "
+                            "Keep responses very short (1-2 sentences max) since the screen is tiny (240x135). "
+                            "Be friendly and playful. Use simple words. "
+                            "NEVER use emoji, markdown formatting, or special Unicode characters. Plain text only.";
+    }
 
-        JsonObject assistMsg = messages.add<JsonObject>();
-        assistMsg["role"] = "assistant";
-        assistMsg["content"] = history[i].assistant;
+    // Only include history for non-pixel-art requests
+    if (!pixelArtMode) {
+        for (int i = 0; i < historyCount; i++) {
+            JsonObject userMsg = messages.add<JsonObject>();
+            userMsg["role"] = "user";
+            userMsg["content"] = history[i].user;
+
+            JsonObject assistMsg = messages.add<JsonObject>();
+            assistMsg["role"] = "assistant";
+            assistMsg["content"] = history[i].assistant;
+        }
     }
 
     JsonObject currentMsg = messages.add<JsonObject>();
     currentMsg["role"] = "user";
-    currentMsg["content"] = userMessage;
+
+    if (pixelArtMode) {
+        // Strip the /draw or /draw16 prefix, send just the subject
+        const char* subject = userMessage.c_str();
+        if (strncmp(subject, "/draw16 ", 8) == 0) subject += 8;
+        else if (strncmp(subject, "/draw16", 7) == 0) subject += 7;
+        else if (strncmp(subject, "/draw ", 6) == 0) subject += 6;
+        else if (strncmp(subject, "/draw", 5) == 0) subject += 5;
+        // Skip leading whitespace
+        while (*subject == ' ') subject++;
+        if (*subject == '\0') subject = "a cute lobster";  // default subject
+        currentMsg["content"] = subject;
+    } else {
+        currentMsg["content"] = userMessage;
+    }
 }

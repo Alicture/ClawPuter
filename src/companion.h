@@ -28,6 +28,7 @@ public:
     void triggerHappy();
     void triggerTalk();
     void triggerIdle();
+    void triggerSleep();
 
     void setWeather(const WeatherData& wd) { weather = wd; }
 
@@ -44,6 +45,11 @@ public:
     float getNormX() const;
     float getNormY() const;
     bool isFacingLeft() const { return facingLeft; }
+
+    // Notification toast overlay
+    void showNotification(const char* app, const char* title, const char* body);
+    void drawNotificationOverlay(M5Canvas& canvas);
+    bool hasActiveNotification() const { return notificationActive; }
 
     // Sound effects
     static void playKeyClick();
@@ -108,6 +114,14 @@ private:
 
     // Draw a sprite with transparency (flip=true for horizontal mirror)
     void drawSprite16(M5Canvas& canvas, int x, int y, const uint16_t* data, bool flip = false);
+
+    // Notification overlay state
+    bool notificationActive = false;
+    unsigned long notificationStartTime = 0;
+    static constexpr unsigned long NOTIFICATION_DURATION = 3000;  // 3 seconds
+    char notifyApp[32];
+    char notifyTitle[48];
+    char notifyBody[64];
 };
 
 // Boot animation (called from main.cpp)

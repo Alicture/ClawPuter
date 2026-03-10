@@ -31,6 +31,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastNormX: CGFloat = 0.5
     private var lastTemperature: Float?
 
+    // Desktop integration
+    private var pixelArtPopover = PixelArtPopover()
+    private var chatViewer = ChatViewerWindow()
+    private var connectionIndicator: NSMenuItem?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
@@ -106,8 +111,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                                      weatherType: weatherType)
             if let nx = normX { self?.lastNormX = CGFloat(nx) }
             if let t = temperature { self?.lastTemperature = t }
+
+            // Update connection indicator
+            self?.connectionIndicator?.title = "ESP32: Connected"
         }
+
+        udpListener.onPixelArtReceived = { [weak self] (size: Int, rows: [String]) in
+            print("[UDP] Pixel art received: \(size)x\(size)")
+            self?.pixelArtPopover.show(size: size, rows: rows)
+        }
+
+        udpListener.onChatMessageReceived = { [weak self] (role: String, text: String) in
+            print("[UDP] Chat: \(role): \(text)")
+            self?.chatViewer.addMessage(role: role, text: text)
+        }
+
         udpListener.start()
+
+        // Chat viewer send callback
+        chatViewer.onSendMessage = { [weak self] text in
+            guard let address = self?.udpListener.esp32Address else {
+                print("[TCP] No ESP32 address known")
+                return
+            }
+            DispatchQueue.global(qos: .userInitiated).async {
+                TCPSender.sendText(address: address, text: text, autoSend: true)
+            }
+        }
 
         // ── Menu bar ──
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -131,10 +161,150 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(followMenuItem)
         menu.addItem(sceneMenuItem)
         menu.addItem(.separator())
+
+        // ── Control submenu ──
+        let controlItem = NSMenuItem(title: "Control", action: nil, keyEquivalent: "")
+        let controlMenu = NSMenu()
+
+        let happyItem = NSMenuItem(title: "Trigger Happy", action: #selector(triggerHappy), keyEquivalent: "")
+        happyItem.target = self
+        controlMenu.addItem(happyItem)
+
+        let sleepItem = NSMenuItem(title: "Trigger Sleep", action: #selector(triggerSleep), keyEquivalent: "")
+        sleepItem.target = self
+        controlMenu.addItem(sleepItem)
+
+        controlMenu.addItem(.separator())
+
+        let sendTextItem = NSMenuItem(title: "Send Text...", action: #selector(showSendTextDialog), keyEquivalent: "")
+        sendTextItem.target = self
+        controlMenu.addItem(sendTextItem)
+
+        let notifyItem = NSMenuItem(title: "Send Notification...", action: #selector(showNotifyDialog), keyEquivalent: "")
+        notifyItem.target = self
+        controlMenu.addItem(notifyItem)
+
+        controlItem.submenu = controlMenu
+        menu.addItem(controlItem)
+
+        menu.addItem(.separator())
+
+        let chatViewerItem = NSMenuItem(title: "Chat Viewer", action: #selector(showChatViewer), keyEquivalent: "")
+        chatViewerItem.target = self
+        menu.addItem(chatViewerItem)
+
+        menu.addItem(.separator())
+
+        // Connection status
+        connectionIndicator = NSMenuItem(title: "ESP32: Waiting...", action: nil, keyEquivalent: "")
+        connectionIndicator?.isEnabled = false
+        menu.addItem(connectionIndicator!)
+
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Pixel Lobster", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         statusItem.menu = menu
     }
+
+    // ── Control actions ──
+
+    @objc private func triggerHappy() {
+        sendCommand { address in
+            TCPSender.triggerAnimate(address: address, state: "happy")
+        }
+    }
+
+    @objc private func triggerSleep() {
+        sendCommand { address in
+            TCPSender.triggerAnimate(address: address, state: "sleep")
+        }
+    }
+
+    @objc private func showSendTextDialog() {
+        let alert = NSAlert()
+        alert.messageText = "Send Text to Cardputer"
+        alert.informativeText = "Enter text to send to the chat input:"
+        alert.addButton(withTitle: "Send")
+        alert.addButton(withTitle: "Cancel")
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        input.placeholderString = "Hello from Mac!"
+        alert.accessoryView = input
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            let text = input.stringValue
+            if !text.isEmpty {
+                sendCommand { address in
+                    TCPSender.sendText(address: address, text: text, autoSend: true)
+                }
+            }
+        }
+    }
+
+    @objc private func showNotifyDialog() {
+        let alert = NSAlert()
+        alert.messageText = "Send Notification"
+        alert.informativeText = "Enter notification details:"
+        alert.addButton(withTitle: "Send")
+        alert.addButton(withTitle: "Cancel")
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 80))
+
+        let titleLabel = NSTextField(labelWithString: "Title:")
+        titleLabel.frame = NSRect(x: 0, y: 56, width: 40, height: 20)
+        container.addSubview(titleLabel)
+        let titleField = NSTextField(frame: NSRect(x: 45, y: 54, width: 215, height: 22))
+        titleField.placeholderString = "Notification title"
+        container.addSubview(titleField)
+
+        let bodyLabel = NSTextField(labelWithString: "Body:")
+        bodyLabel.frame = NSRect(x: 0, y: 28, width: 40, height: 20)
+        container.addSubview(bodyLabel)
+        let bodyField = NSTextField(frame: NSRect(x: 45, y: 26, width: 215, height: 22))
+        bodyField.placeholderString = "Notification body"
+        container.addSubview(bodyField)
+
+        let appLabel = NSTextField(labelWithString: "App:")
+        appLabel.frame = NSRect(x: 0, y: 0, width: 40, height: 20)
+        container.addSubview(appLabel)
+        let appField = NSTextField(frame: NSRect(x: 45, y: -2, width: 215, height: 22))
+        appField.placeholderString = "App name (optional)"
+        container.addSubview(appField)
+
+        alert.accessoryView = container
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            let title = titleField.stringValue
+            let body = bodyField.stringValue
+            let app = appField.stringValue
+            if !title.isEmpty || !body.isEmpty {
+                sendCommand { address in
+                    TCPSender.sendNotification(address: address, app: app, title: title, body: body)
+                }
+            }
+        }
+    }
+
+    @objc private func showChatViewer() {
+        chatViewer.show()
+    }
+
+    private func sendCommand(_ block: @escaping (String) -> Void) {
+        guard let address = udpListener.esp32Address else {
+            let alert = NSAlert()
+            alert.messageText = "No ESP32 Connected"
+            alert.informativeText = "Waiting for UDP broadcast from Cardputer..."
+            alert.runModal()
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            block(address)
+        }
+    }
+
+    // ── Display mode switching ──
 
     @objc private func switchToFollow() {
         guard displayMode != .follow else { return }
@@ -180,6 +350,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func tick() {
+        // Perch on Chat Viewer when visible (follow mode only)
+        if displayMode == .follow, chatViewer.isWindowVisible, let chatFrame = chatViewer.windowFrame {
+            let windowW = petSize + followPadRight
+            behavior.perchTarget = NSPoint(
+                x: chatFrame.midX - windowW / 2,
+                y: chatFrame.maxY - 5  // feet slightly overlap title bar
+            )
+        } else {
+            behavior.perchTarget = nil
+        }
+
         let needsRedraw = behavior.update()
 
         switch displayMode {

@@ -94,6 +94,17 @@ void Chat::handleKey(char key) {
 void Chat::handleEnter() {
     if (inputBuffer.length() == 0 || waitingForAI) return;
 
+    // Detect /draw commands before consuming input
+    drawMode = false;
+    drawSize = 8;
+    if (inputBuffer.startsWith("/draw16")) {
+        drawMode = true;
+        drawSize = 16;
+    } else if (inputBuffer.startsWith("/draw")) {
+        drawMode = true;
+        drawSize = 8;
+    }
+
     addMessage(inputBuffer, true);
     pendingMessage = inputBuffer;
     inputBuffer = "";
@@ -101,7 +112,7 @@ void Chat::handleEnter() {
     userScrolled = false;
 
     // Add placeholder for AI response
-    addMessage("thinking...", false);
+    addMessage(drawMode ? "drawing..." : "thinking...", false);
 }
 
 void Chat::handleBackspace() {
@@ -137,6 +148,13 @@ void Chat::appendAIToken(const char* token) {
 }
 
 void Chat::onAIResponseComplete() {
+    // Try to parse pixel art from the last AI message
+    if (drawMode && messageCount > 0) {
+        int idx = (messageCount - 1) % MAX_MESSAGES;
+        parsePixelArtResponse(idx);
+    }
+    drawMode = false;
+
     waitingForAI = false;
     userScrolled = false;
     scrollToBottom();
@@ -155,6 +173,9 @@ void Chat::setInput(const String& text) {
 void Chat::addMessage(const String& text, bool isUser) {
     int idx = messageCount % MAX_MESSAGES;
     messages[idx].isUser = isUser;
+    messages[idx].isPixelArt = false;
+    messages[idx].pixelSize = 0;
+    messages[idx].pixelSlot = -1;
     if (!isUser) {
         // AI messages grow via streaming — pre-reserve to avoid realloc
         messages[idx].text = "";
@@ -172,6 +193,10 @@ void Chat::addMessage(const String& text, bool isUser) {
 
 int Chat::calcMessageHeight(M5Canvas& canvas, const Message& msg) {
     if (msg.isUser) return LINE_H;
+    if (msg.isPixelArt) {
+        // 96px grid + 2px border + LINE_H for label = 96 + 4 + LINE_H
+        return PIXEL_ART_RENDER_SIZE + 4 + LINE_H;
+    }
 
     char buf[64]; // stack buffer for textWidth measurement
     int lines = countWrappedLines(canvas, msg.text.c_str(), MAX_W, buf, sizeof(buf));
@@ -229,6 +254,25 @@ void Chat::drawMessages(M5Canvas& canvas) {
                 canvas.drawString(msg.text.c_str(), tx, y);
             }
             y += LINE_H;
+        } else if (msg.isPixelArt) {
+            // Pixel art message — render grid with border and label
+            int msgH = calcMessageHeight(canvas, msg);
+            if (y >= MSG_AREA_Y - msgH && y < SCREEN_H - INPUT_BAR_H) {
+                // Size label
+                canvas.setTextColor(Color::STATUS_DIM);
+                char label[8];
+                snprintf(label, sizeof(label), "%dx%d", msg.pixelSize, msg.pixelSize);
+                canvas.drawString(label, 6, y);
+
+                // Border + pixel grid
+                int gridY = y + LINE_H;
+                int gridX = 6;
+                canvas.drawRect(gridX - 1, gridY - 1,
+                                PIXEL_ART_RENDER_SIZE + 2, PIXEL_ART_RENDER_SIZE + 2,
+                                Color::STATUS_DIM);
+                drawPixelArt(canvas, msg, gridX, gridY);
+            }
+            y += msgH;
         } else {
             // AI message — word wrap using pointer arithmetic, zero heap allocation
             canvas.setTextColor(Color::CHAT_AI);
@@ -271,7 +315,7 @@ void Chat::drawInputBar(M5Canvas& canvas) {
 
     if (waitingForAI) {
         canvas.setTextColor(Color::STATUS_DIM);
-        canvas.drawString("waiting...", 4, barY + 4);
+        canvas.drawString(drawMode ? "drawing..." : "waiting...", 4, barY + 4);
     } else {
         // Show input with cursor — use snprintf to avoid String concatenation
         char display[128];
@@ -290,6 +334,150 @@ void Chat::drawInputBar(M5Canvas& canvas) {
             canvas.drawString(truncated, 4, barY + 4);
         } else {
             canvas.drawString(display, 4, barY + 4);
+        }
+    }
+}
+
+// ── Pixel Art Support ──
+
+// Convert hex char to palette index (0-15), returns -1 on invalid
+static int hexCharToIndex(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+    if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+    return -1;
+}
+
+void Chat::parsePixelArtResponse(int msgIdx) {
+    Message& msg = messages[msgIdx];
+    const char* text = msg.text.c_str();
+
+    // Find [PIXELART:N] tag
+    const char* start = strstr(text, "[PIXELART:");
+    if (!start) return;
+
+    int size = atoi(start + 10);  // parse N after ":"
+    if (size != 8 && size != 16) return;
+
+    // Find closing tag
+    const char* end = strstr(start, "[/PIXELART]");
+    if (!end) return;
+
+    // Find the start of pixel data (after the first ']' in [PIXELART:N])
+    const char* dataStart = strchr(start + 10, ']');
+    if (!dataStart || dataStart >= end) return;
+    dataStart++;  // skip ']'
+
+    // Skip whitespace/newlines
+    while (dataStart < end && (*dataStart == '\n' || *dataStart == '\r' || *dataStart == ' '))
+        dataStart++;
+
+    // Allocate a pixel slot (round-robin)
+    int slot = nextPixelSlot;
+    nextPixelSlot = (nextPixelSlot + 1) % PIXEL_SLOTS;
+    uint16_t* pixels = pixelBuffers[slot];
+
+    // Invalidate any old message that used this slot
+    int total = min(messageCount, MAX_MESSAGES);
+    int startOld = (messageCount > MAX_MESSAGES) ? (messageCount - MAX_MESSAGES) : 0;
+    for (int i = 0; i < total; i++) {
+        int oi = (startOld + i) % MAX_MESSAGES;
+        if (messages[oi].pixelSlot == slot) {
+            messages[oi].pixelSlot = -1;
+            messages[oi].isPixelArt = false;
+        }
+    }
+
+    // Parse row by row
+    int row = 0;
+    const char* p = dataStart;
+    while (p < end && row < size) {
+        // Skip whitespace between rows
+        while (p < end && (*p == '\n' || *p == '\r' || *p == ' ')) p++;
+        if (p >= end) break;
+
+        // Parse one row of hex chars
+        int col = 0;
+        while (p < end && col < size && *p != '\n' && *p != '\r') {
+            int idx = hexCharToIndex(*p);
+            if (idx < 0) { p++; continue; }  // skip non-hex chars
+
+            uint16_t color = pgm_read_word(&PIXEL_ART_PALETTE[idx]);
+            pixels[row * size + col] = color;
+            col++;
+            p++;
+        }
+
+        // Fill remaining cols with transparent if row was short
+        while (col < size) {
+            pixels[row * size + col] = Color::TRANSPARENT;
+            col++;
+        }
+        row++;
+    }
+
+    // Fill remaining rows with transparent
+    while (row < size) {
+        for (int col = 0; col < size; col++)
+            pixels[row * size + col] = Color::TRANSPARENT;
+        row++;
+    }
+
+    // Mark as pixel art
+    msg.isPixelArt = true;
+    msg.pixelSize = size;
+    msg.pixelSlot = slot;
+    msg.text = "[pixel art]";  // Release large text buffer
+    newPixelArt = true;
+
+    Serial.printf("[CHAT] Parsed %dx%d pixel art (slot %d)\n", size, size, slot);
+}
+
+int Chat::getLastPixelArtRows(char rows[][17], int maxRows) const {
+    // Find the most recent pixel art message with a valid slot
+    int total = min(messageCount, MAX_MESSAGES);
+    int startIdx = (messageCount > MAX_MESSAGES) ? (messageCount - MAX_MESSAGES) : 0;
+
+    for (int i = total - 1; i >= 0; i--) {
+        int idx = (startIdx + i) % MAX_MESSAGES;
+        const Message& msg = messages[idx];
+        if (!msg.isPixelArt || msg.pixelSlot < 0) continue;
+
+        const uint16_t* pixels = pixelBuffers[msg.pixelSlot];
+        int size = msg.pixelSize;
+        int rowCount = min(size, maxRows);
+
+        // Reverse-convert pixels back to hex chars
+        for (int r = 0; r < rowCount; r++) {
+            for (int c = 0; c < size && c < 16; c++) {
+                uint16_t color = pixels[r * size + c];
+                // Find matching palette index
+                char hex = '0';  // default transparent
+                for (int p = 0; p < 16; p++) {
+                    if (pgm_read_word(&PIXEL_ART_PALETTE[p]) == color) {
+                        hex = (p < 10) ? ('0' + p) : ('a' + p - 10);
+                        break;
+                    }
+                }
+                rows[r][c] = hex;
+            }
+            rows[r][size] = '\0';
+        }
+        return size;
+    }
+    return 0;
+}
+
+void Chat::drawPixelArt(M5Canvas& canvas, const Message& msg, int x, int y) {
+    if (msg.pixelSlot < 0) return;  // No valid pixel data
+    const uint16_t* pixels = pixelBuffers[msg.pixelSlot];
+    int scale = (msg.pixelSize == 8) ? 12 : 6;  // Both render to 96×96
+    for (int py = 0; py < msg.pixelSize; py++) {
+        for (int px = 0; px < msg.pixelSize; px++) {
+            uint16_t color = pixels[py * msg.pixelSize + px];
+            if (color != Color::TRANSPARENT) {
+                canvas.fillRect(x + px * scale, y + py * scale, scale, scale, color);
+            }
         }
     }
 }

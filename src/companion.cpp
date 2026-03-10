@@ -199,6 +199,10 @@ void Companion::triggerIdle() {
     playNotification();
 }
 
+void Companion::triggerSleep() {
+    setState(CompanionState::SLEEP);
+}
+
 // ── Weather Simulation Mode ──
 
 static const WeatherType SIM_WEATHER_TYPES[] = {
@@ -777,6 +781,49 @@ void Companion::drawSimStatusBar(M5Canvas& canvas) {
     snprintf(label, sizeof(label), "[SIM] %s (%d)", SIM_WEATHER_NAMES[simWeatherIndex], simWeatherIndex + 1);
     int tw = canvas.textWidth(label);
     canvas.drawString(label, (SCREEN_W - tw) / 2, barY + 2);
+}
+
+// ── Notification Toast ──
+
+void Companion::showNotification(const char* app, const char* title, const char* body) {
+    strncpy(notifyApp, app, sizeof(notifyApp) - 1);
+    notifyApp[sizeof(notifyApp) - 1] = '\0';
+    strncpy(notifyTitle, title, sizeof(notifyTitle) - 1);
+    notifyTitle[sizeof(notifyTitle) - 1] = '\0';
+    strncpy(notifyBody, body, sizeof(notifyBody) - 1);
+    notifyBody[sizeof(notifyBody) - 1] = '\0';
+    notificationActive = true;
+    notificationStartTime = millis();
+    playNotification();
+}
+
+void Companion::drawNotificationOverlay(M5Canvas& canvas) {
+    if (!notificationActive) return;
+    if (millis() - notificationStartTime > NOTIFICATION_DURATION) {
+        notificationActive = false;
+        return;
+    }
+
+    // Dark semi-transparent bar at top
+    int barH = 28;
+    canvas.fillRect(0, 0, SCREEN_W, barH, rgb565(30, 30, 40));
+    canvas.drawFastHLine(0, barH, SCREEN_W, Color::STATUS_DIM);
+
+    canvas.setTextSize(1);
+
+    // App name + title on first line
+    char line1[80];
+    if (notifyApp[0]) {
+        snprintf(line1, sizeof(line1), "[%s] %s", notifyApp, notifyTitle);
+    } else {
+        snprintf(line1, sizeof(line1), "%s", notifyTitle);
+    }
+    canvas.setTextColor(Color::WHITE);
+    canvas.drawString(line1, 4, 2);
+
+    // Body on second line
+    canvas.setTextColor(Color::CLOCK_TEXT);
+    canvas.drawString(notifyBody, 4, 15);
 }
 
 // ══════════════════════════════════════════════════════════════
