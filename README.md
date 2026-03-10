@@ -258,9 +258,12 @@ See [OpenClaw Research](docs/openclaw-research.md) for the full integration guid
 - [x] Desktop bidirectional control (Mac ↔ ESP32 commands, chat sync, pixel art sync, notifications)
 - [ ] Battery display with low-power character animation
 - [ ] Chat history persistence (NVS/SD card)
-- [ ] Pet system (hunger/mood mechanics)
+- [ ] Pet system (hunger/mood mechanics with bath/feed interactions)
 - [ ] Pomodoro timer
 - [ ] BLE phone notifications
+- [ ] Professional pixel art upgrade (Stardew Valley style)
+- [ ] Long TTS support (server-side chunked streaming or SD card)
+- [ ] M5Burner firmware publishing (one-click flash for community)
 
 See [full roadmap](docs/roadmap.md).
 
