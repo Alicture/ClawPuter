@@ -2,6 +2,7 @@
 .vscode/
 .claude/
 *.env
+!.env.example
 .build/
 .DS_Store
 CLAUDE.md

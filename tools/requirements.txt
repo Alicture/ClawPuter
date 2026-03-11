@@ -1,0 +1,10 @@
+# Dependencies for tools/stt_proxy.py
+#
+# Install:
+#   pip install -r tools/requirements.txt
+#
+# System dependencies (install separately):
+#   - ffmpeg: brew install ffmpeg (macOS) / apt install ffmpeg (Linux)
+#   - curl: usually pre-installed
+
+edge-tts>=6.1.0
