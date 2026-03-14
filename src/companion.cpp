@@ -1,5 +1,6 @@
 #include "companion.h"
 #include "sprites.h"
+#include "config.h"
 #include <time.h>
 
 // Character draw dimensions
@@ -175,6 +176,33 @@ void Companion::handleKey(char key) {
         return;
     }
 
+    // Volume control: + increase, - decrease, m mute
+    if (key == '+' || key == '=') {
+        uint8_t vol = Config::getVolume();
+        if (vol < 255) {
+            vol = (vol >= 245) ? 255 : vol + 10;
+            Config::setVolume(vol);
+            Config::save();
+        }
+        playKeyClick();
+        return;
+    } else if (key == '-') {
+        uint8_t vol = Config::getVolume();
+        if (vol > 0) {
+            vol = (vol <= 10) ? 0 : vol - 10;
+            Config::setVolume(vol);
+            Config::save();
+        }
+        playKeyClick();
+        return;
+    } else if (key == 'm' || key == 'M') {
+        uint8_t vol = Config::getVolume();
+        Config::setVolume(vol > 0 ? 0 : 255);
+        Config::save();
+        playKeyClick();
+        return;
+    }
+
     if (key == ' ' || key == '\n') {
         triggerHappy();
     } else {
@@ -297,6 +325,8 @@ float Companion::getNormY() const {
 // ── Sound Effects ──
 
 void Companion::playKeyClick() {
+    uint8_t vol = Config::getVolume();
+    if (vol == 0) return;  // 静音
     M5Cardputer.Speaker.tone(800, 30);
 }
 
@@ -706,6 +736,17 @@ void Companion::drawStatusText(M5Canvas& canvas) {
     canvas.setTextColor(Color::STATUS_DIM);
     canvas.setTextSize(1);
     canvas.drawString(statusStr, 4, 4);
+
+    // Volume display: [+/-/M] vol
+    uint8_t vol = Config::getVolume();
+    char volStr[16];
+    if (vol == 0) {
+        snprintf(volStr, sizeof(volStr), "[M] vol:OFF");
+    } else {
+        snprintf(volStr, sizeof(volStr), "[+/-] vol:%d", (vol * 100) / 255);
+    }
+    canvas.drawString(volStr, 4, 14);
+
     canvas.drawString("[TAB] chat", SCREEN_W - 60, 4);
 }
 
