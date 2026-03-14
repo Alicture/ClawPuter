@@ -65,7 +65,7 @@ static AppMode appMode = AppMode::SETUP;
 static bool offlineMode = false;
 
 // ── Setup mode state ──
-enum class SetupStep { SSID, PASSWORD, GATEWAY_HOST, GATEWAY_PORT, GATEWAY_TOKEN, STT_HOST, CONNECTING };
+enum class SetupStep { SSID, PASSWORD, GATEWAY_HOST, GATEWAY_PORT, GATEWAY_TOKEN, STT_HOST, VOLUME, CONNECTING };
 static SetupStep setupStep = SetupStep::SSID;
 static String setupInput;
 
@@ -89,7 +89,6 @@ void enterChatMode();
 void setup() {
     auto cfg = M5.config();
     M5Cardputer.begin(cfg, true);
-    M5Cardputer.Speaker.setVolume(255);
     Serial.begin(115200);
     delay(500);
     Serial.println("[BOOT] Starting...");
@@ -104,6 +103,9 @@ void setup() {
     Config::load();
     fillBuildTimeDefaults();
     Config::save();
+    
+    // Apply saved volume setting
+    M5Cardputer.Speaker.setVolume(Config::getVolume());
 
     // Play boot animation
     playBootAnimation(canvas);
@@ -570,6 +572,18 @@ void updateSetupMode() {
             canvas.drawString("[Tab] cancel", 170, 62);
             break;
 
+        case SetupStep::VOLUME:
+            canvas.drawString("Volume (0-255):", 10, 25);
+            snprintf(hint, sizeof(hint), "%d", Config::getVolume());
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString(hint, 130, 25);
+            canvas.setTextColor(Color::WHITE);
+            canvas.drawString((setupInput + "_").c_str(), 10, 42);
+            canvas.setTextColor(Color::STATUS_DIM);
+            canvas.drawString("[Enter] confirm", 10, 62);
+            canvas.drawString("[Tab] skip", 150, 62);
+            break;
+
         case SetupStep::CONNECTING:
             canvas.drawString("Connecting to WiFi...", 50, 55);
             {
@@ -651,6 +665,18 @@ void handleSetupKey(char key, bool enter, bool backspace, bool tab) {
         case SetupStep::STT_HOST:
             if (setupInput.length() > 0) {
                 Config::setSttHost(setupInput);
+            }
+            setupInput = "";
+            setupStep = SetupStep::VOLUME;
+            break;
+
+        case SetupStep::VOLUME:
+            {
+                int vol = setupInput.toInt();
+                if (vol < 0) vol = 0;
+                if (vol > 255) vol = 255;
+                Config::setVolume(vol);
+                M5Cardputer.Speaker.setVolume(vol);
             }
             Config::save();
             setupInput = "";

@@ -14,6 +14,7 @@ static String ssid2;
 static String password2;
 static String gatewayHost2;
 static String city;
+static uint8_t volume = 255;
 
 bool Config::load() {
     prefs.begin("companion", true); // read-only
@@ -29,6 +30,7 @@ bool Config::load() {
     password2 = prefs.getString("pass2", "");
     gatewayHost2 = prefs.getString("gw_host2", "");
     city = prefs.getString("city", "");
+    volume = prefs.getUChar("volume", 255);
     prefs.end();
     return ssid.length() > 0;
 }
@@ -47,6 +49,7 @@ void Config::save() {
     prefs.putString("pass2", password2);
     prefs.putString("gw_host2", gatewayHost2);
     prefs.putString("city", city);
+    prefs.putUChar("volume", volume);
     prefs.end();
 }
 
@@ -66,6 +69,7 @@ void Config::reset() {
     password2 = "";
     gatewayHost2 = "";
     city = "";
+    volume = 255;
 }
 
 const String& Config::getSSID() { return ssid; }
@@ -80,6 +84,7 @@ const String& Config::getSSID2() { return ssid2; }
 const String& Config::getPassword2() { return password2; }
 const String& Config::getGatewayHost2() { return gatewayHost2; }
 const String& Config::getCity() { return city; }
+uint8_t Config::getVolume() { return volume; }
 
 void Config::setSSID(const String& s) { ssid = s; }
 void Config::setPassword(const String& p) { password = p; }
@@ -93,5 +98,6 @@ void Config::setSSID2(const String& s) { ssid2 = s; }
 void Config::setPassword2(const String& p) { password2 = p; }
 void Config::setGatewayHost2(const String& h) { gatewayHost2 = h; }
 void Config::setCity(const String& c) { city = c; }
+void Config::setVolume(uint8_t vol) { volume = vol; }
 
 bool Config::isValid() { return ssid.length() > 0; }

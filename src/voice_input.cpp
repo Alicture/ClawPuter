@@ -74,7 +74,7 @@ void VoiceInput::initMic() {
 void VoiceInput::deinitMic() {
     M5Cardputer.Mic.end();
     M5Cardputer.Speaker.begin();
-    M5Cardputer.Speaker.setVolume(255);
+    M5Cardputer.Speaker.setVolume(Config::getVolume());
     Serial.println("[VOICE] Mic stopped, speaker restored");
 }
 
