@@ -327,16 +327,23 @@ float Companion::getNormY() const {
 void Companion::playKeyClick() {
     uint8_t vol = Config::getVolume();
     if (vol == 0) return;  // 静音
+    M5Cardputer.Speaker.setVolume(vol);
     M5Cardputer.Speaker.tone(800, 30);
 }
 
 void Companion::playNotification() {
+    uint8_t vol = Config::getVolume();
+    if (vol == 0) return;
+    M5Cardputer.Speaker.setVolume(vol);
     M5Cardputer.Speaker.tone(1200, 80);
     delay(100);
     M5Cardputer.Speaker.tone(1600, 80);
 }
 
 void Companion::playHappy() {
+    uint8_t vol = Config::getVolume();
+    if (vol == 0) return;
+    M5Cardputer.Speaker.setVolume(vol);
     M5Cardputer.Speaker.tone(1000, 50);
     delay(60);
     M5Cardputer.Speaker.tone(1400, 50);
