@@ -198,6 +198,26 @@ void loop() {
                     enterSetupMode();
                     break;
                 }
+                // Fn+[ = volume down
+                if (ks.fn && ks.word.size() > 0 && ks.word[0] == '[') {
+                    int vol = Config::getVolume();
+                    if (vol > 10) vol -= 10;
+                    else vol = 0;
+                    Config::setVolume(vol);
+                    M5Cardputer.Speaker.setVolume(vol);
+                    Config::save();
+                    break;
+                }
+                // Fn+] = volume up
+                if (ks.fn && ks.word.size() > 0 && ks.word[0] == ']') {
+                    int vol = Config::getVolume();
+                    if (vol < 245) vol += 10;
+                    else vol = 255;
+                    Config::setVolume(vol);
+                    M5Cardputer.Speaker.setVolume(vol);
+                    Config::save();
+                    break;
+                }
                 // Digit keys 1-8 in weather sim mode
                 if (companion.isWeatherSimMode() && ks.word.size() > 0) {
                     char ch = ks.word[0];
