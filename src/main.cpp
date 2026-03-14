@@ -415,16 +415,13 @@ void loop() {
                         chat.clearNewPixelArt();
                     }
 
-                    // TTS: speak the AI response (skip for pixel art)
-                    if (!aiError && !hasPixelArt && aiClient.getLastResponse().length() > 0) {
-                        // Show "Speaking..." indicator while downloading PCM
-                        chat.update(canvas);
-                        ttsPlayback.drawSpeakingBar(canvas);
-                        canvas.pushSprite(0, 0);
-
-                        ttsPlayback.requestAndPlay(aiClient.getLastResponse().c_str());
-                        // playRaw is non-blocking (DMA queue), returns immediately
-                    }
+                    // TTS disabled to prevent input lag after AI response
+                    // if (!aiError && !hasPixelArt && aiClient.getLastResponse().length() > 0) {
+                    //     chat.update(canvas);
+                    //     ttsPlayback.drawSpeakingBar(canvas);
+                    //     canvas.pushSprite(0, 0);
+                    //     ttsPlayback.requestAndPlay(aiClient.getLastResponse().c_str());
+                    // }
                     companion.triggerIdle();
 
                     // Resync keyboard after blocking AI + TTS download.
