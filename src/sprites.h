@@ -190,3 +190,7 @@ constexpr int SLEEP_FRAME_COUNT = 1;
 
 const uint16_t* const talk_frames[] = { sprite_talk1, sprite_talk2 };
 constexpr int TALK_FRAME_COUNT = 2;
+
+// Busy (working) - reusing talk frames for typing animation
+const uint16_t* const busy_frames[] = { sprite_talk1, sprite_talk2 };
+constexpr int BUSY_FRAME_COUNT = 2;

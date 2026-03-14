@@ -88,6 +88,9 @@ void Companion::setState(CompanionState newState) {
         case CompanionState::LOOK:
             animTimer.setInterval(300);
             break;
+        case CompanionState::BUSY:
+            animTimer.setInterval(150);  // faster animation for typing
+            break;
     }
 }
 
@@ -140,6 +143,9 @@ void Companion::update(M5Canvas& canvas) {
                 if (millis() - stateStartTime > 2400) { // 2 cycles × 4 frames × 300ms
                     setState(CompanionState::IDLE);
                 }
+                break;
+            case CompanionState::BUSY:
+                frameIndex %= BUSY_FRAME_COUNT;
                 break;
         }
     }
@@ -229,6 +235,15 @@ void Companion::triggerIdle() {
 
 void Companion::triggerSleep() {
     setState(CompanionState::SLEEP);
+}
+
+void Companion::triggerBusy() {
+    setState(CompanionState::BUSY);
+    idleTimeout.reset();  // prevent sleep while busy
+}
+
+void Companion::triggerBusyEnd() {
+    setState(CompanionState::IDLE);
 }
 
 // ── Weather Simulation Mode ──
@@ -616,6 +631,9 @@ void Companion::drawCharacter(M5Canvas& canvas) {
         case CompanionState::TALK:
             frame = talk_frames[frameIndex % TALK_FRAME_COUNT];
             break;
+        case CompanionState::BUSY:
+            frame = busy_frames[frameIndex % BUSY_FRAME_COUNT];
+            break;
     }
 
     if (frame) {
@@ -738,6 +756,7 @@ void Companion::drawStatusText(M5Canvas& canvas) {
         case CompanionState::TALK:    statusStr = "talking..."; break;
         case CompanionState::STRETCH: statusStr = "*stretch*"; break;
         case CompanionState::LOOK:    statusStr = "hmm?"; break;
+        case CompanionState::BUSY:    statusStr = "working..."; break;
     }
 
     canvas.setTextColor(Color::STATUS_DIM);

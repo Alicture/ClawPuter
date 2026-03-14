@@ -9,7 +9,8 @@ enum class CompanionState {
     SLEEP,
     TALK,
     STRETCH,   // spontaneous stretch
-    LOOK       // spontaneous look around
+    LOOK,      // spontaneous look around
+    BUSY       // working at computer
 };
 
 enum class AccessoryType : uint8_t {
@@ -29,6 +30,8 @@ public:
     void triggerTalk();
     void triggerIdle();
     void triggerSleep();
+    void triggerBusy();
+    void triggerBusyEnd();
 
     void setWeather(const WeatherData& wd) { weather = wd; }
 

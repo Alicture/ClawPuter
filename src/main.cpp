@@ -456,10 +456,10 @@ void loop() {
         }
     }
 
-    // Process incoming TCP commands (skip in chat mode to reduce input lag)
-    // if (!offlineMode && appMode != AppMode::SETUP) {
-    //     cmdServer.tick();
-    // }
+    // Process incoming TCP commands
+    if (!offlineMode && appMode != AppMode::SETUP) {
+        cmdServer.tick();
+    }
 
     // Broadcast state over UDP for desktop sync (skip if offline or not yet initialized)
     if (!offlineMode && appMode != AppMode::SETUP) {
@@ -873,6 +873,8 @@ void initOnlineServices(bool usedSecondary) {
         else if (strcmp(state, "idle") == 0) companion.triggerIdle();
         else if (strcmp(state, "sleep") == 0) companion.triggerSleep();
         else if (strcmp(state, "talk") == 0) companion.triggerTalk();
+        else if (strcmp(state, "busy") == 0) companion.triggerBusy();
+        else if (strcmp(state, "busy_end") == 0) companion.triggerBusyEnd();
     });
     cmdServer.onText([](const char* text, bool autoSend) {
         Serial.printf("[CMD] Text: '%s' autoSend=%d\n", text, autoSend);
