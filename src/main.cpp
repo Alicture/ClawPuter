@@ -363,6 +363,10 @@ void loop() {
                     int drawSz = chat.getDrawSize();
                     aiClient.setPixelArtMode(isDrawCmd, drawSz);
 
+                    // Refresh UI to show "thinking..." before blocking AI call
+                    chat.update(canvas);
+                    canvas.pushSprite(0, 0);
+
                     bool aiError = false;
                     aiClient.sendMessage(msg,
                         // onToken — receives const char* (zero heap allocation)
@@ -455,10 +459,10 @@ void loop() {
         }
     }
 
-    // Process incoming TCP commands from desktop app
-    if (!offlineMode && appMode != AppMode::SETUP) {
-        cmdServer.tick();
-    }
+    // Process incoming TCP commands (skip in chat mode to reduce input lag)
+    // if (!offlineMode && appMode != AppMode::SETUP) {
+    //     cmdServer.tick();
+    // }
 
     // Broadcast state over UDP for desktop sync (skip if offline or not yet initialized)
     if (!offlineMode && appMode != AppMode::SETUP) {
