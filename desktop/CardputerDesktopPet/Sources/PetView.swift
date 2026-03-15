@@ -13,6 +13,18 @@ class PetView: NSView {
     var temperature: Float?  // from ESP32, nil when not connected
     private var sleepStartTime: TimeInterval = 0
 
+    // ── Message popup ──
+    var popupMessage: String? {
+        didSet {
+            if popupMessage != nil {
+                popupStartTime = ProcessInfo.processInfo.systemUptime
+            }
+            needsDisplay = true
+        }
+    }
+    private var popupStartTime: TimeInterval = 0
+    private let popupDuration: TimeInterval = 5.0
+
     override var isFlipped: Bool { false }
 
     // ── Scene constants ──
@@ -110,6 +122,18 @@ class PetView: NSView {
 
         if petState == .sleep {
             drawSleepZ()
+        }
+
+        // Draw popup message
+        if let msg = popupMessage {
+            let elapsed = ProcessInfo.processInfo.systemUptime - popupStartTime
+            if elapsed < popupDuration {
+                drawMessageBubble(message: msg)
+            } else {
+                popupMessage = nil
+            }
+            // Force continuous redraw for pagination
+            needsDisplay = true
         }
     }
 
@@ -462,6 +486,94 @@ class PetView: NSView {
         let x = (bounds.width - size.width) / 2
         let y = (groundHeight - size.height) / 2
         displayText.draw(at: NSPoint(x: x, y: y), withAttributes: attrs)
+    }
+
+    // MARK: - Message Bubble
+
+    private var popupPage: Int = 0
+
+    private func drawMessageBubble(message: String) {
+        let rect = spriteRect
+        let bubbleX = rect.midX
+        // Draw bubble below sprite to avoid clipping at top
+        let bubbleY = rect.minY - 8
+
+        let maxWidth: CGFloat = 180
+        let fontSize: CGFloat = 12
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: fontSize),
+            .foregroundColor: NSColor.black
+        ]
+
+        // Wrap text to max width
+        let wrapped = wrapText(message, maxWidth: maxWidth - 16, attrs: attrs)
+        let lineHeight: CGFloat = fontSize + 2
+        let padding: CGFloat = 8
+        let linesPerPage = 5
+        let totalPages = (wrapped.count + linesPerPage - 1) / linesPerPage
+
+        // Auto-advance pages
+        let cycleTime = ProcessInfo.processInfo.systemUptime - popupStartTime
+        popupPage = Int(cycleTime / 3.0) % max(totalPages, 1)
+
+        let startIdx = popupPage * linesPerPage
+        let endIdx = min(startIdx + linesPerPage, wrapped.count)
+        let visibleLines = Array(wrapped[startIdx..<endIdx])
+
+        let bubbleW = maxWidth
+        let bubbleH = CGFloat(visibleLines.count) * lineHeight + padding * 2 + (totalPages > 1 ? 12 : 0)
+
+        var bx = bubbleX - bubbleW / 2
+        let by = bubbleY
+
+        // Keep in bounds
+        bx = max(4, min(bx, bounds.width - bubbleW - 4))
+
+        // Draw bubble background with border
+        NSColor.white.setFill()
+        let bubbleRect = NSRect(x: bx, y: by, width: bubbleW, height: bubbleH)
+        NSBezierPath(roundedRect: bubbleRect, xRadius: 8, yRadius: 8).fill()
+        NSColor.black.setStroke()
+        let borderPath = NSBezierPath(roundedRect: bubbleRect.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8)
+        borderPath.lineWidth = 1
+        borderPath.stroke()
+
+        // Draw wrapped text
+        for (i, line) in visibleLines.enumerated() {
+            line.draw(at: NSPoint(x: bx + padding, y: by + bubbleH - padding - CGFloat(i + 1) * lineHeight), withAttributes: attrs)
+        }
+
+        // Draw page indicator
+        if totalPages > 1 {
+            let pageText = "\(popupPage + 1)/\(totalPages)"
+            let pageAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 9),
+                .foregroundColor: NSColor.gray
+            ]
+            pageText.draw(at: NSPoint(x: bx + bubbleW - 24, y: by + 4), withAttributes: pageAttrs)
+        }
+    }
+
+    private func wrapText(_ text: String, maxWidth: CGFloat, attrs: [NSAttributedString.Key: Any]) -> [String] {
+        var lines: [String] = []
+        var currentLine = ""
+
+        for char in text {
+            let testLine = currentLine + String(char)
+            let size = testLine.size(withAttributes: attrs)
+            if size.width > maxWidth && !currentLine.isEmpty {
+                lines.append(currentLine)
+                currentLine = String(char)
+            } else {
+                currentLine = testLine
+            }
+        }
+        if !currentLine.isEmpty {
+            lines.append(currentLine)
+        }
+
+        return lines
     }
 
     // MARK: - Sleep Z

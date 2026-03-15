@@ -142,6 +142,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         udpListener.onChatMessageReceived = { [weak self] (role: String, text: String) in
             print("[UDP] Chat: \(role): \(text)")
             self?.chatViewer.addMessage(role: role, text: text)
+
+            // Show popup on pet for AI responses
+            if role == "ai" && !text.isEmpty {
+                DispatchQueue.main.async {
+                    // Pass full message to PetView - pagination handles display
+                    self?.petView.popupMessage = text
+                    self?.sceneView.popupMessage = text
+                }
+            }
         }
 
         udpListener.start()

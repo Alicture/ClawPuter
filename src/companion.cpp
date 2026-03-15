@@ -774,6 +774,17 @@ void Companion::drawStatusText(M5Canvas& canvas) {
     canvas.drawString(volStr, 4, 14);
 
     canvas.drawString("[TAB] chat", SCREEN_W - 60, 4);
+    
+    // Battery display
+    int batteryLevel = M5Cardputer.Power.getBatteryLevel();
+    bool isCharging = M5Cardputer.Power.isCharging();
+    char batStr[12];
+    if (isCharging) {
+        snprintf(batStr, sizeof(batStr), "🔋 %d%%", batteryLevel);
+    } else {
+        snprintf(batStr, sizeof(batStr), "⚡%d%%", batteryLevel);
+    }
+    canvas.drawString(batStr, SCREEN_W - 50, 14);
 }
 
 // ── Accessories ──
