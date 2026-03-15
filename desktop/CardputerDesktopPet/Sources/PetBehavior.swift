@@ -8,6 +8,7 @@ enum PetState {
     case talk
     case stretch
     case look
+    case busy
 }
 
 /// Manages pet state machine, cursor following, and animation timing
@@ -62,12 +63,21 @@ class PetBehavior {
     private var lastSyncNormX: Float = -1
     private var lastSyncNormY: Float = -1
 
+    // ── Busy detection (working at computer) ──
+    var onBusyStateChanged: ((Bool) -> Void)?  // true = busy, false = not busy
+    private var isUserActive: Bool = false
+    private var lastActivityTime: TimeInterval = 0
+    private let busyTimeout: TimeInterval = 3.0  // 3 seconds of activity → busy
+
     init() {
         lastUpdateTime = ProcessInfo.processInfo.systemUptime
     }
 
     /// Called when mouse moves globally
     func onMouseMoved(to point: NSPoint) {
+        lastActivityTime = ProcessInfo.processInfo.systemUptime
+        isUserActive = true
+
         let dx = point.x - lastCursorX
         let dy = point.y - lastCursorY
         let distance = sqrt(dx * dx + dy * dy)
@@ -122,6 +132,12 @@ class PetBehavior {
         lastCursorY = point.y
     }
 
+    /// Called when user presses a key (detected by global keyboard monitor)
+    func onKeyPressed() {
+        lastActivityTime = ProcessInfo.processInfo.systemUptime
+        isUserActive = true
+    }
+
     /// Apply state from ESP32 UDP broadcast
     func applySync(state espState: Int, frame: Int,
                    normX: Float? = nil, normY: Float? = nil, direction: Int? = nil,
@@ -130,7 +146,7 @@ class PetBehavior {
         syncMode = true
 
         // Map ESP32 CompanionState enum to PetState
-        // 0=IDLE, 1=HAPPY, 2=SLEEP, 3=TALK, 4=STRETCH, 5=LOOK
+        // 0=IDLE, 1=HAPPY, 2=SLEEP, 3=TALK, 4=STRETCH, 5=LOOK, 6=BUSY
         switch espState {
         case 0: state = .idle
         case 1: state = .happy
@@ -138,6 +154,7 @@ class PetBehavior {
         case 3: state = .talk
         case 4: state = .stretch
         case 5: state = .look
+        case 6: state = .busy
         default: state = .idle
         }
 
@@ -213,9 +230,30 @@ class PetBehavior {
                     currentFrame = 0
                     needsRedraw = true
                 }
-            case .sleep, .talk, .stretch, .look:
+            case .sleep, .talk, .stretch, .look, .busy:
                 break
             }
+
+            // Reset active flag after timeout
+            if (now - lastActivityTime) > busyTimeout {
+                isUserActive = false
+            }
+        }
+
+        // Busy detection: works even in sync mode - send command to ESP32
+        let timeSinceActivity = now - lastActivityTime
+        let shouldBeBusy = isUserActive && timeSinceActivity < busyTimeout
+
+        if shouldBeBusy && state != .busy && state != .happy && state != .sleep && state != .talk {
+            state = .busy
+            currentFrame = 0
+            needsRedraw = true
+            onBusyStateChanged?(true)
+        } else if !shouldBeBusy && state == .busy {
+            state = .idle
+            currentFrame = 0
+            needsRedraw = true
+            onBusyStateChanged?(false)
         }
 
         // Perch mode overrides target
@@ -259,6 +297,7 @@ class PetBehavior {
         case .walk: return SpriteFrames.walk
         case .happy: return SpriteFrames.happy
         case .sleep: return SpriteFrames.sleep
+        case .busy: return SpriteFrames.talk  // reuse talk animation for busy
         case .talk: return SpriteFrames.talk
         case .stretch: return SpriteFrames.stretch
         case .look: return SpriteFrames.look

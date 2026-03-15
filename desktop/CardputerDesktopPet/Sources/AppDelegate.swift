@@ -88,6 +88,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.behavior.onMouseMoved(to: NSEvent.mouseLocation)
         }
 
+        // Keyboard monitor for busy detection
+        NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] _ in
+            self?.behavior.onKeyPressed()
+        }
+
+        // Busy state callback — send to ESP32
+        behavior.onBusyStateChanged = { [weak self] isBusy in
+            guard let address = self?.udpListener.esp32Address else {
+                fputs("[BEHAVIOR] No ESP32 address\n", stderr)
+                return
+            }
+            let state = isBusy ? "busy" : "busy_end"
+            fputs("[BEHAVIOR] Sending \(state) to \(address)\n", stderr)
+            DispatchQueue.global(qos: .userInitiated).async {
+                TCPSender.triggerAnimate(address: address, state: state)
+            }
+        }
+
         // Reposition scene panel when display configuration changes
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
