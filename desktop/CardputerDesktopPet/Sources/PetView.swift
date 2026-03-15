@@ -18,12 +18,14 @@ class PetView: NSView {
         didSet {
             if popupMessage != nil {
                 popupStartTime = ProcessInfo.processInfo.systemUptime
+                popupPage = 0  // Reset to first page for new message
             }
             needsDisplay = true
         }
     }
     private var popupStartTime: TimeInterval = 0
-    private let popupDuration: TimeInterval = 5.0
+    private var popupPage: Int = 0
+    private var popupDuration: TimeInterval = 5.0
 
     override var isFlipped: Bool { false }
 
@@ -490,79 +492,110 @@ class PetView: NSView {
 
     // MARK: - Message Bubble
 
-    private var popupPage: Int = 0
-
     private func drawMessageBubble(message: String) {
         let rect = spriteRect
         let bubbleX = rect.midX
-        // Draw bubble below sprite to avoid clipping at top
-        let bubbleY = rect.minY - 8
+        let bubbleY = rect.maxY + 4  // Above sprite
 
-        let maxWidth: CGFloat = 180
-        let fontSize: CGFloat = 12
+        let maxWidth: CGFloat = 110
+        let fontSize: CGFloat = 10
+        let padding: CGFloat = 4
+        let linesPerPage = 3
+        let pageAdvanceInterval: TimeInterval = 5.0
+
+        // Create attributed string with word wrapping
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = .byWordWrapping
+        paragraphStyle.alignment = .left
 
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: fontSize),
-            .foregroundColor: NSColor.black
+            .foregroundColor: NSColor.black,
+            .paragraphStyle: paragraphStyle
         ]
 
-        // Wrap text to max width
-        let wrapped = wrapText(message, maxWidth: maxWidth - 16, attrs: attrs)
-        let lineHeight: CGFloat = fontSize + 2
-        let padding: CGFloat = 8
-        let linesPerPage = 5
-        let totalPages = (wrapped.count + linesPerPage - 1) / linesPerPage
+        let attrString = NSAttributedString(string: message, attributes: attrs)
 
-        // Auto-advance pages
-        let cycleTime = ProcessInfo.processInfo.systemUptime - popupStartTime
-        popupPage = Int(cycleTime / 3.0) % max(totalPages, 1)
+        // Calculate text size (for reference)
+        _ = attrString.boundingRect(
+            with: NSSize(width: maxWidth - padding * 2, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
 
-        let startIdx = popupPage * linesPerPage
-        let endIdx = min(startIdx + linesPerPage, wrapped.count)
-        let visibleLines = Array(wrapped[startIdx..<endIdx])
-
+        // Calculate bubble size
+        let lineHeight = fontSize + 2
+        let textHeight = CGFloat(linesPerPage) * lineHeight
         let bubbleW = maxWidth
-        let bubbleH = CGFloat(visibleLines.count) * lineHeight + padding * 2 + (totalPages > 1 ? 12 : 0)
+        let bubbleH = textHeight + padding * 2 + 12  // Extra for page indicator
 
+        // Position: above sprite, clamp to view bounds
         var bx = bubbleX - bubbleW / 2
-        let by = bubbleY
+        var by = bubbleY
 
-        // Keep in bounds
-        bx = max(4, min(bx, bounds.width - bubbleW - 4))
+        // Keep in bounds horizontally
+        bx = max(0, min(bx, bounds.width - bubbleW))
+        // Don't go above view top
+        if by + bubbleH > bounds.height {
+            by = bounds.height - bubbleH
+        }
 
-        // Draw bubble background with border
+        // Draw bubble background
         NSColor.white.setFill()
         let bubbleRect = NSRect(x: bx, y: by, width: bubbleW, height: bubbleH)
-        NSBezierPath(roundedRect: bubbleRect, xRadius: 8, yRadius: 8).fill()
+        NSBezierPath(roundedRect: bubbleRect, xRadius: 6, yRadius: 6).fill()
         NSColor.black.setStroke()
-        let borderPath = NSBezierPath(roundedRect: bubbleRect.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8)
+        let borderPath = NSBezierPath(roundedRect: bubbleRect.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
         borderPath.lineWidth = 1
         borderPath.stroke()
 
-        // Draw wrapped text
-        for (i, line) in visibleLines.enumerated() {
-            line.draw(at: NSPoint(x: bx + padding, y: by + bubbleH - padding - CGFloat(i + 1) * lineHeight), withAttributes: attrs)
-        }
+        // Draw text in rect (auto-wrapping)
+        let textRect = NSRect(
+            x: bx + padding,
+            y: by + padding + 8,
+            width: maxWidth - padding * 2,
+            height: textHeight
+        )
 
-        // Draw page indicator
+        // Calculate pagination - limit to 10 chars per line
+        let wrapped = wrapText(message, maxWidth: maxWidth - padding * 2, attrs: attrs, maxCharsPerLine: 10)
+        let totalPages = max(1, (wrapped.count + linesPerPage - 1) / linesPerPage)
+        popupDuration = max(5.0, Double(totalPages) * pageAdvanceInterval)
+
+        let cycleTime = ProcessInfo.processInfo.systemUptime - popupStartTime
+        popupPage = Int(cycleTime / pageAdvanceInterval) % totalPages
+
+        let startIdx = popupPage * linesPerPage
+        let endIdx = min(startIdx + linesPerPage, wrapped.count)
+        let visibleText = wrapped[startIdx..<endIdx].joined(separator: "\n")
+
+        let visibleAttrString = NSAttributedString(string: visibleText, attributes: attrs)
+        visibleAttrString.draw(in: textRect)
+
+        // Page indicator
         if totalPages > 1 {
             let pageText = "\(popupPage + 1)/\(totalPages)"
             let pageAttrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 9),
+                .font: NSFont.systemFont(ofSize: 8),
                 .foregroundColor: NSColor.gray
             ]
-            pageText.draw(at: NSPoint(x: bx + bubbleW - 24, y: by + 4), withAttributes: pageAttrs)
+            let pageSize = pageText.size(withAttributes: pageAttrs)
+            pageText.draw(at: NSPoint(
+                x: bx + bubbleW - pageSize.width - 4,
+                y: by + 4
+            ), withAttributes: pageAttrs)
         }
     }
 
-    private func wrapText(_ text: String, maxWidth: CGFloat, attrs: [NSAttributedString.Key: Any]) -> [String] {
+    private func wrapText(_ text: String, maxWidth: CGFloat, attrs: [NSAttributedString.Key: Any], maxCharsPerLine: Int? = nil) -> [String] {
         var lines: [String] = []
         var currentLine = ""
 
         for char in text {
             let testLine = currentLine + String(char)
             let size = testLine.size(withAttributes: attrs)
-            if size.width > maxWidth && !currentLine.isEmpty {
+            let charLimit = maxCharsPerLine ?? Int.max
+
+            if (size.width > maxWidth || currentLine.count >= charLimit) && !currentLine.isEmpty {
                 lines.append(currentLine)
                 currentLine = String(char)
             } else {

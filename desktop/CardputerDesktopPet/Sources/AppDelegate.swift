@@ -23,7 +23,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let petSize: CGFloat = 128
     private let followPadRight: CGFloat = 40
-    private let followPadTop: CGFloat = 48
+    private let followPadTop: CGFloat = 60  // Space for bubble above sprite
     private let sceneW: CGFloat = 360
     private let sceneH: CGFloat = 200
 
