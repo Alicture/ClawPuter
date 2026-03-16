@@ -94,11 +94,14 @@ class UDPListener {
            let frame = dict["f"] as? Int,
            let mode = dict["m"] as? String {
 
-            let normX = dict["x"] as? Float ?? 0.5
-            let normY = dict["y"] as? Float ?? 0.5
+            // Parse as Double first, then convert to Float (JSON numbers might be Double)
+            let normX = (dict["x"] as? NSNumber)?.floatValue ?? 0.5
+            let normY = (dict["y"] as? NSNumber)?.floatValue ?? 0.5
             let direction = dict["d"] as? Int ?? 0
             let weather = dict["w"] as? Int ?? -1
-            let temperature = dict["t"] as? Float ?? -999
+            let temperature = (dict["t"] as? NSNumber)?.floatValue ?? -999
+
+            print("[UDP] State: \(state) frame:\(frame) normX:\(normX) direction:\(direction)")
 
             UDPSender.shared.setDeviceAddress(ip)
             onDeviceAddress?(ip)
