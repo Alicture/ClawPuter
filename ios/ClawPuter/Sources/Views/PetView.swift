@@ -80,7 +80,7 @@ struct PetView: View {
                     }
                     Spacer()
                 }
-                .offset(y: sceneMode ? -(groundHeight + 2) : 0)
+                .offset(y: sceneMode ? (groundHeight + 2) : 0)
 
                 // Accessories based on weather
                 if sceneMode {
@@ -94,7 +94,7 @@ struct PetView: View {
 
                 // Sleep Z animation
                 if viewModel.deviceState.state == .sleep && sceneMode {
-                    SleepZAnimation(scale: scale, spriteOrigin: CGPoint(x: horizontalOffset, y: groundHeight + 2))
+                    SleepZAnimation(scale: scale, spriteOrigin: CGPoint(x: horizontalOffset, y: groundHeight + 2), spriteSize: spriteSize)
                 }
 
                 // Clock in scene mode
@@ -739,15 +739,15 @@ struct SunglassesView: View {
             Rectangle()
                 .fill(Color(red: 20/255, green: 20/255, blue: 40/255))
                 .frame(width: 24, height: 8)
-                .offset(x: spriteOrigin.x + 32 * 8 / CGFloat(scale), y: -(spriteSize - 48))
+                .offset(x: spriteOrigin.x + 32 * 8 / CGFloat(scale), y: -(spriteOrigin.y + spriteSize - 48))
             Rectangle()
                 .fill(Color(red: 20/255, green: 20/255, blue: 40/255))
                 .frame(width: 24, height: 8)
-                .offset(x: spriteOrigin.x + 72 * 8 / CGFloat(scale), y: -(spriteSize - 48))
+                .offset(x: spriteOrigin.x + 72 * 8 / CGFloat(scale), y: -(spriteOrigin.y + spriteSize - 48))
             Rectangle()
                 .fill(Color(red: 20/255, green: 20/255, blue: 40/255))
                 .frame(width: 16, height: 3)
-                .offset(x: spriteOrigin.x + 56 * 8 / CGFloat(scale), y: -(spriteSize - 46))
+                .offset(x: spriteOrigin.x + 56 * 8 / CGFloat(scale), y: -(spriteOrigin.y + spriteSize - 46))
         }
     }
 }
@@ -759,16 +759,16 @@ struct UmbrellaView: View {
 
     var body: some View {
         ZStack {
-            // Umbrella top
+            // Umbrella top - positioned above sprite
             RoundedRectangle(cornerRadius: 11)
                 .fill(Color(red: 60/255, green: 60/255, blue: 200/255))
                 .frame(width: 96, height: 21)
-                .offset(x: spriteOrigin.x + 16 * 8 / CGFloat(scale), y: -(spriteSize + 6))
+                .offset(x: spriteOrigin.x + 16 * 8 / CGFloat(scale), y: -(spriteOrigin.y + spriteSize + 6))
             // Handle
             Rectangle()
                 .fill(Color(red: 120/255, green: 80/255, blue: 40/255))
                 .frame(width: 4, height: 22)
-                .offset(x: spriteOrigin.x + 62 * 8 / CGFloat(scale), y: -(spriteSize - 16))
+                .offset(x: spriteOrigin.x + 62 * 8 / CGFloat(scale), y: -(spriteOrigin.y + spriteSize - 16))
         }
     }
 }
@@ -784,12 +784,12 @@ struct SnowHatView: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color(red: 200/255, green: 60/255, blue: 60/255))
                 .frame(width: 80, height: 16)
-                .offset(x: spriteOrigin.x + 24 * 8 / CGFloat(scale), y: -(spriteSize - 24))
+                .offset(x: spriteOrigin.x + 24 * 8 / CGFloat(scale), y: -(spriteOrigin.y + spriteSize - 24))
             // Pom pom
             Circle()
                 .fill(.white)
                 .frame(width: 16, height: 16)
-                .offset(x: spriteOrigin.x + 56 * 8 / CGFloat(scale), y: -(spriteSize))
+                .offset(x: spriteOrigin.x + 56 * 8 / CGFloat(scale), y: -(spriteOrigin.y + spriteSize))
         }
     }
 }
@@ -805,16 +805,16 @@ struct MaskView: View {
             Rectangle()
                 .fill(Color(red: 180/255, green: 200/255, blue: 180/255))
                 .frame(width: 64, height: 16)
-                .offset(x: spriteOrigin.x + 32 * 8 / CGFloat(scale), y: -(spriteSize - 72))
+                .offset(x: spriteOrigin.x + 32 * 8 / CGFloat(scale), y: -(spriteOrigin.y + spriteSize - 72))
             // Straps
             Rectangle()
                 .fill(Color(red: 120/255, green: 120/255, blue: 120/255))
                 .frame(width: 8, height: 3)
-                .offset(x: spriteOrigin.x + 24 * 8 / CGFloat(scale), y: -(spriteSize - 64))
+                .offset(x: spriteOrigin.x + 24 * 8 / CGFloat(scale), y: -(spriteOrigin.y + spriteSize - 64))
             Rectangle()
                 .fill(Color(red: 120/255, green: 120/255, blue: 120/255))
                 .frame(width: 8, height: 3)
-                .offset(x: spriteOrigin.x + 96 * 8 / CGFloat(scale), y: -(spriteSize - 64))
+                .offset(x: spriteOrigin.x + 96 * 8 / CGFloat(scale), y: -(spriteOrigin.y + spriteSize - 64))
         }
     }
 }
@@ -824,6 +824,7 @@ struct MaskView: View {
 struct SleepZAnimation: View {
     let scale: Int
     let spriteOrigin: CGPoint
+    let spriteSize: CGFloat
 
     @State private var phase: Int = 0
 
@@ -835,19 +836,19 @@ struct SleepZAnimation: View {
                 Text("z")
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                     .foregroundColor(.white.opacity(0.9))
-                    .offset(x: spriteOrigin.x + 106 * 16 / CGFloat(scale), y: -(spriteOrigin.y + 68 * 16 / CGFloat(scale)))
+                    .offset(x: spriteOrigin.x + 106 * 16 / CGFloat(scale), y: -(spriteOrigin.y + spriteSize + 68 * 16 / CGFloat(scale)))
             }
             if phase >= 2 {
                 Text("Z")
                     .font(.system(size: 20, weight: .bold, design: .monospaced))
                     .foregroundColor(.white.opacity(0.9))
-                    .offset(x: spriteOrigin.x + 118 * 16 / CGFloat(scale), y: -(spriteOrigin.y + 96 * 16 / CGFloat(scale)))
+                    .offset(x: spriteOrigin.x + 118 * 16 / CGFloat(scale), y: -(spriteOrigin.y + spriteSize + 96 * 16 / CGFloat(scale)))
             }
             if phase >= 3 {
                 Text("Z")
                     .font(.system(size: 34, weight: .bold, design: .monospaced))
                     .foregroundColor(.white.opacity(0.9))
-                    .offset(x: spriteOrigin.x + 112 * 16 / CGFloat(scale), y: -(spriteOrigin.y + 132 * 16 / CGFloat(scale)))
+                    .offset(x: spriteOrigin.x + 112 * 16 / CGFloat(scale), y: -(spriteOrigin.y + spriteSize + 132 * 16 / CGFloat(scale)))
             }
         }
         .onReceive(timer) { _ in

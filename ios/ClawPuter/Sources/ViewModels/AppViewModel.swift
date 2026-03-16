@@ -38,7 +38,9 @@ class AppViewModel: ObservableObject {
 
     func sendMessage() {
         guard !inputText.isEmpty else { return }
-        udpSender.sendText(text: inputText, autoSend: true)
+        let message = inputText
+        chatMessages.append(ChatMessage(role: "user", text: message))
+        udpSender.sendText(text: message, autoSend: true)
         inputText = ""
     }
 
