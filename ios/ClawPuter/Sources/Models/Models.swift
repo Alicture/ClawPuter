@@ -29,7 +29,8 @@ struct DeviceState {
     var temperature: Float = -999
 
     mutating func update(state: Int, frame: Int, mode: String, normX: Float, normY: Float, direction: Int, weather: Int, temp: Float) {
-        self.state = PetState(rawValue: ["idle", "happy", "sleep", "working", "chilling"][state]) ?? .idle
+        let states = ["idle", "happy", "sleep", "working", "chilling"]
+        self.state = (state >= 0 && state < states.count) ? PetState(rawValue: states[state]) ?? .idle : .idle
         self.frame = frame
         self.mode = mode
         self.normX = normX
