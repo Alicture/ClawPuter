@@ -4,6 +4,8 @@ struct PetView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var currentFrame = 0
     @State private var timer: Timer?
+    @State private var normX: Float = 0.5
+    @State private var facingLeft: Bool = false
     private let frameDuration: Double = 200
 
     var body: some View {
@@ -12,14 +14,15 @@ struct PetView: View {
             let scale = Int(size / 16)
             let spriteSize = CGFloat(scale * 16)
 
+            // Compute offset from state
+            let maxOffset = max(0, geometry.size.width - spriteSize)
+            let horizontalOffset = CGFloat(normX) * maxOffset
+
             ZStack {
                 // Background with weather
                 weatherBackground
 
                 // Sprite with position offset based on normX
-                let maxOffset = geometry.size.width - spriteSize
-                let horizontalOffset = CGFloat(viewModel.deviceState.normX) * maxOffset
-
                 HStack {
                     Rectangle()
                         .fill(Color.clear)
@@ -81,6 +84,12 @@ struct PetView: View {
         .onDisappear { stopAnimation() }
         .onChange(of: viewModel.deviceState.frame) { _ in
             currentFrame = viewModel.deviceState.frame
+        }
+        .onChange(of: viewModel.deviceState.normX) { newValue in
+            normX = newValue
+        }
+        .onChange(of: viewModel.deviceState.direction) { newValue in
+            facingLeft = newValue == 1
         }
     }
 
