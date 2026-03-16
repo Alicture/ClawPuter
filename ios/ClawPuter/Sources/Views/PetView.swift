@@ -36,15 +36,16 @@ struct PetView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let size = min(geometry.size.width, geometry.size.height)
-            let scale = Int(size / 16)
-            let spriteSize = CGFloat(scale * 16)
             let sceneWidth = geometry.size.width
             let sceneHeight = geometry.size.height
 
+            // Pet size - use larger portion of height
+            let spriteSize: CGFloat = min(sceneHeight * 0.5, 150)
+            let scale = Int(spriteSize / 16)
+
             // Compute offset from state
-            let maxOffset = max(0, sceneWidth - spriteSize)
-            let horizontalOffset = CGFloat(normX) * maxOffset
+            let maxOffset = max(0, sceneWidth - spriteSize - 20)
+            let horizontalOffset = CGFloat(normX) * maxOffset + 10
 
             ZStack {
                 // Background with weather/scene
@@ -146,7 +147,7 @@ struct PetView: View {
                 .padding(8)
             }
         }
-        .aspectRatio(1, contentMode: .fit)
+        .aspectRatio(16/9, contentMode: .fit)
         .cornerRadius(16)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .onAppear { startAnimation() }
@@ -536,13 +537,14 @@ struct WeatherParticlesView: View {
 
         let w = sceneWidth
         let h = sceneHeight
+        let skyTop = groundHeight + 30  // Start from sky, not ground
 
         switch weatherType {
-        case 4: // Snow
+        case 4: // Snow - fall from sky to ground
             particles = (0..<12).map { _ in
                 WeatherParticle(
                     x: CGFloat.random(in: 0...w),
-                    y: CGFloat.random(in: groundHeight...h),
+                    y: CGFloat.random(in: skyTop...h),
                     speed: 4,
                     drift: 0,
                     length: 8
@@ -552,17 +554,17 @@ struct WeatherParticlesView: View {
             particles = (0..<20).map { _ in
                 WeatherParticle(
                     x: CGFloat.random(in: 0...w),
-                    y: CGFloat.random(in: groundHeight...h),
+                    y: CGFloat.random(in: skyTop...h),
                     speed: 7,
                     drift: 0,
                     length: 14
                 )
             }
-        case 6: // Rain
+        case 6: // Rain - fall from sky
             particles = (0..<20).map { _ in
                 WeatherParticle(
                     x: CGFloat.random(in: 0...w),
-                    y: CGFloat.random(in: groundHeight...h),
+                    y: CGFloat.random(in: skyTop...h),
                     speed: 1.5,
                     drift: CGFloat([-1.0, 0, 1.0].randomElement()!),
                     length: 3
@@ -578,10 +580,12 @@ struct WeatherParticlesView: View {
 
     private func startParticleTimer() {
         Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+            let skyTop = groundHeight + 30
             for i in particles.indices {
-                particles[i].y -= particles[i].speed
+                particles[i].y -= particles[i].speed  // Fall down
                 particles[i].x += particles[i].drift
 
+                // When hits ground, respawn at top
                 if particles[i].y < groundHeight {
                     particles[i].y = sceneHeight + CGFloat.random(in: 0...20)
                     particles[i].x = CGFloat.random(in: 0...sceneWidth)
