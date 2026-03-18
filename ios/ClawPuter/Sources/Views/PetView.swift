@@ -16,8 +16,10 @@ struct PetView: View {
     @State private var currentFrame = 0
     @State private var timer: Timer?
     @State private var normX: Float = 0.5
+    @State private var normY: Float = 0.5
     @State private var facingLeft: Bool = false
     @State private var spriteNormX: CGFloat = 0.5
+    @State private var spriteNormY: CGFloat = 0.5
 
     // Scene mode state
     @State private var sceneMode: Bool = true  // Default to scene mode
@@ -46,8 +48,11 @@ struct PetView: View {
             let scale = Int(spriteSize / 16)
 
             // Compute offset from state
-            let maxOffset = max(0, sceneW - spriteSize - 20)
-            let horizontalOffset = CGFloat(normX) * maxOffset + 10
+            let maxOffsetX = max(0, sceneW - spriteSize - 20)
+            let horizontalOffset = CGFloat(normX) * maxOffsetX + 10
+            // Vertical offset (normY: 0=top, 1=bottom)
+            let maxOffsetY = sceneH * 0.3  // Can move up to 30% of height
+            let verticalOffset = CGFloat(normY) * maxOffsetY
 
             ZStack {
                 // Background with weather/scene
@@ -71,7 +76,7 @@ struct PetView: View {
                     weatherBackground
                 }
 
-                // Sprite with position offset based on normX
+                // Sprite with position offset based on normX and normY
                 HStack {
                     Rectangle()
                         .fill(Color.clear)
@@ -82,7 +87,7 @@ struct PetView: View {
                     }
                     Spacer()
                 }
-                .offset(y: sceneMode ? (groundHeight + 2) : 0)
+                .offset(y: sceneMode ? (groundHeight + 2 + verticalOffset) : 0)
 
                 // Accessories based on weather
                 if sceneMode {
@@ -164,6 +169,10 @@ struct PetView: View {
                         let newNormX = Float(value.location.x / sceneW)
                         normX = max(0, min(1, newNormX))
                         spriteNormX = CGFloat(normX)
+                        // Calculate normY from drag position (inverted: top=1, bottom=0)
+                        let newNormY = Float(1.0 - value.location.y / sceneH)
+                        normY = max(0, min(1, newNormY))
+                        spriteNormY = CGFloat(normY)
                         // Update direction based on movement
                         if value.translation.width < -5 {
                             facingLeft = true
@@ -182,6 +191,10 @@ struct PetView: View {
         .onChange(of: viewModel.deviceState.normX) { newValue in
             normX = newValue
             spriteNormX = CGFloat(newValue)
+        }
+        .onChange(of: viewModel.deviceState.normY) { newValue in
+            normY = newValue
+            spriteNormY = CGFloat(normY)
         }
         .onChange(of: viewModel.deviceState.direction) { newValue in
             facingLeft = newValue == 1
