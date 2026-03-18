@@ -97,13 +97,7 @@ struct PetView: View {
                     SleepZAnimation(scale: scale, spriteOrigin: CGPoint(x: horizontalOffset, y: groundHeight + 2), spriteSize: spriteSize)
                 }
 
-                // Clock in scene mode
-                if sceneMode {
-                    ClockDisplay(temperature: viewModel.deviceState.temperature)
-                        .offset(y: -groundHeight / 2 + 8)
-                }
-
-                // Info overlay
+                // Info overlay at top with safe area
                 VStack {
                     HStack {
                         // Connection status
@@ -144,7 +138,22 @@ struct PetView: View {
                             .foregroundColor(.white.opacity(0.8))
                     }
                 }
-                .padding(8)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+                .background(
+                    LinearGradient(colors: [.black.opacity(0.5), .clear],
+                                   startPoint: .top, endPoint: .bottom)
+                )
+
+                // Clock at bottom center
+                if sceneMode {
+                    VStack {
+                        Spacer()
+                        ClockDisplay(temperature: viewModel.deviceState.temperature)
+                            .padding(.bottom, groundHeight + 20)
+                    }
+                }
             }
         }
         .clipped()
@@ -696,7 +705,7 @@ struct ClockDisplay: View {
             .foregroundColor(Color(red: 180/255, green: 180/255, blue: 200/255))
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(Color.black.opacity(0.3))
+            .background(Color.black.opacity(0.5))
             .cornerRadius(4)
     }
 }
