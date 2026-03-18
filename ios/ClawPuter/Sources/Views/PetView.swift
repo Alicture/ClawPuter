@@ -147,9 +147,7 @@ struct PetView: View {
                 .padding(8)
             }
         }
-        .aspectRatio(16/9, contentMode: .fit)
-        .cornerRadius(16)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipped()
         .onAppear { startAnimation() }
         .onDisappear { stopAnimation() }
         .onChange(of: viewModel.deviceState.frame) { _ in

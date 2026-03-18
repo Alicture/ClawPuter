@@ -8,25 +8,31 @@ struct ContentView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             // Tab 1: Pet Animation
-            VStack(spacing: 0) {
-                // Connection status bar
-                HStack {
-                    Circle()
-                        .fill(viewModel.isConnected ? Color.green : Color.red)
-                        .frame(width: 8, height: 8)
+            GeometryReader { geometry in
+                ZStack {
+                    // Full screen pet view
+                    PetView(viewModel: viewModel)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
 
-                    Text(viewModel.isConnected ? "Connected: \(viewModel.connectedIP ?? "Unknown")" : "Waiting for device...")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    // Connection status overlay at top
+                    VStack {
+                        HStack {
+                            Circle()
+                                .fill(viewModel.isConnected ? Color.green : Color.red)
+                                .frame(width: 8, height: 8)
 
-                    Spacer()
+                            Text(viewModel.isConnected ? "Connected: \(viewModel.connectedIP ?? "Unknown")" : "Waiting for device...")
+                                .font(.caption)
+                                .foregroundColor(.white)
+                                .shadow(radius: 2)
+
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        Spacer()
+                    }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color(.secondarySystemBackground))
-
-                PetView(viewModel: viewModel)
-                    .padding()
             }
             .tabItem {
                 Label("Pet", systemImage: "hare.fill")
