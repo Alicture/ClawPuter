@@ -33,18 +33,20 @@ struct PetView: View {
 
     private let frameDuration: Double = 200
     private let groundHeight: CGFloat = 28
+    @State private var sceneWidth: CGFloat = 0
+    @State private var sceneHeight: CGFloat = 0
 
     var body: some View {
         GeometryReader { geometry in
-            let sceneWidth = geometry.size.width
-            let sceneHeight = geometry.size.height
+            let sceneW = geometry.size.width
+            let sceneH = geometry.size.height
 
             // Pet size - use larger portion of height
-            let spriteSize: CGFloat = min(sceneHeight * 0.5, 150)
+            let spriteSize: CGFloat = min(sceneH * 0.5, 150)
             let scale = Int(spriteSize / 16)
 
             // Compute offset from state
-            let maxOffset = max(0, sceneWidth - spriteSize - 20)
+            let maxOffset = max(0, sceneW - spriteSize - 20)
             let horizontalOffset = CGFloat(normX) * maxOffset + 10
 
             ZStack {
@@ -155,6 +157,21 @@ struct PetView: View {
                     }
                 }
             }
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        // Calculate normX from drag position
+                        let newNormX = Float(value.location.x / sceneW)
+                        normX = max(0, min(1, newNormX))
+                        spriteNormX = CGFloat(normX)
+                        // Update direction based on movement
+                        if value.translation.width < -5 {
+                            facingLeft = true
+                        } else if value.translation.width > 5 {
+                            facingLeft = false
+                        }
+                    }
+            )
         }
         .clipped()
         .onAppear { startAnimation() }
